@@ -191,15 +191,34 @@ def train_single_pollutant(
         test_r2 = float(r2_score(y_test, y_pred))
 
         exceedances = int((y_pred > (cfg.naaqs_annual or 9999)).sum()) if cfg.naaqs_annual else 0
+
+        # Sub-group analysis: cities seen during training vs unseen cities
+        train_cities = set(train_df["city"].str.lower().str.strip())
+        is_seen = test_df["city"].str.lower().str.strip().isin(train_cities).values
+
+        seen_r2 = float(r2_score(y_test[is_seen], y_pred[is_seen])) if is_seen.sum() > 5 else None
+        seen_rmse = float(np.sqrt(mean_squared_error(y_test[is_seen], y_pred[is_seen]))) if is_seen.sum() > 5 else None
+
+        unseen_r2 = float(r2_score(y_test[~is_seen], y_pred[~is_seen])) if (~is_seen).sum() > 5 else None
+        unseen_rmse = float(np.sqrt(mean_squared_error(y_test[~is_seen], y_pred[~is_seen]))) if (~is_seen).sum() > 5 else None
+
         test_report = {
             "n_samples": len(y_test),
-            "years": "2022–2023",
+            "years": f"{int(test_df['year'].min())}–{int(test_df['year'].max())}",
             "rmse_ugm3": round(test_rmse, 3),
             "mae_ugm3": round(test_mae, 3),
             "r2": round(test_r2, 3),
             "baseline_mean_rmse": round(baseline_rmse, 3),
             "baseline_mean_mae": round(baseline_mae, 3),
             "naaqs_exceedances_detected": exceedances,
+            "city_overlap_analysis": {
+                "seen_cities_count": int(is_seen.sum()),
+                "unseen_cities_count": int((~is_seen).sum()),
+                "seen_cities_r2": round(seen_r2, 3) if seen_r2 is not None else None,
+                "seen_cities_rmse": round(seen_rmse, 3) if seen_rmse is not None else None,
+                "unseen_cities_r2": round(unseen_r2, 3) if unseen_r2 is not None else None,
+                "unseen_cities_rmse": round(unseen_rmse, 3) if unseen_rmse is not None else None,
+            },
         }
 
     # Save artifacts
@@ -223,6 +242,7 @@ def train_single_pollutant(
         "naaqs_annual_threshold": cfg.naaqs_annual,
         "training_years": f"{int(train_df['year'].min())}–{int(train_df['year'].max())}",
         "n_train_samples": int(len(X_train)),
+        "n_test_samples": int(len(X_test)),
         "cross_validation": {
             "method": "GroupKFold (state groups)",
             "n_folds": len(cv_scores),

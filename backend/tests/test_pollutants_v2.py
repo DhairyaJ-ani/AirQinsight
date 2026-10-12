@@ -161,3 +161,35 @@ def test_api_xai_explain_endpoint():
     assert "physics_explanation" in data
     assert "top_features" in data["lightgbm_explanation"]
 
+
+def test_pm10_and_so2_artifact_loading_and_prediction():
+    from ml_engine.registry import get_model_registry
+    registry = get_model_registry()
+
+    # PM10
+    booster_pm10, meta_pm10, _ = registry.load_lightgbm("pm10")
+    assert booster_pm10 is not None
+    assert meta_pm10["target"] == "pm10"
+    assert meta_pm10["target_unit"] == "µg/m³"
+    pred_pm10 = registry.predict_lightgbm("pm10", {"year": 2024, "so2": 15.0, "no2": 25.0, "lat": 19.07, "lon": 72.87})
+    assert pred_pm10 > 0
+    assert pred_pm10 < 1000.0
+
+    # SO2
+    booster_so2, meta_so2, _ = registry.load_lightgbm("so2")
+    assert booster_so2 is not None
+    assert meta_so2["target"] == "so2"
+    assert meta_so2["target_unit"] == "µg/m³"
+    pred_so2 = registry.predict_lightgbm("so2", {"year": 2024, "no2": 25.0, "pm10": 90.0, "lat": 19.07, "lon": 72.87})
+    assert pred_so2 > 0
+    assert pred_so2 < 1000.0
+
+
+def test_unsupported_pollutant_handling():
+    from ml_engine.training.train_pollutant import prepare_pollutant_dataset
+    with pytest.raises(ValueError, match="insufficient_data"):
+        prepare_pollutant_dataset("data/namp_openaq_all_pollutants.csv", "co")
+
+    with pytest.raises(ValueError, match="Unsupported pollutant"):
+        prepare_pollutant_dataset("data/namp_openaq_all_pollutants.csv", "unknown_gas")
+
