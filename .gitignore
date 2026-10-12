@@ -1,0 +1,38 @@
+# macOS system files
+.DS_Store
+**/.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+
+# Environment files
+.env
+.env.*
+.env*.local
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+env/
+venv/
+ENV/
+
+# Testing & Linting
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local caches & outputs
+backend/cache/
+backend/runs/
+backend/outputs/
+node_modules/
+.next/
+dist/
+build/
