@@ -245,3 +245,95 @@ async def test_get_map_ensemble_flag_threaded(auth_client):
     assert gen.call_args.kwargs.get("use_ensemble") is True
     data = response.json()
     assert data["ensemble_active"] is True
+
+
+# ---------------------------------------------------------------------------
+# Ensemble downscaler validation, serialization, and robust error handling
+# ---------------------------------------------------------------------------
+
+
+def test_ensemble_downscaler_weights_validation():
+    """EnsembleDownscaler enforces non-negative weights and positive sum."""
+    from ml_engine.downscaling.ensemble import EnsembleDownscaler
+
+    # Negative weight rejected
+    with pytest.raises(ValueError, match="non-negative"):
+        EnsembleDownscaler(weights={"xgboost": -0.1, "random_forest": 0.5, "lightgbm": 0.5})
+
+    # Zero total weight rejected
+    with pytest.raises(ValueError, match="positive"):
+        EnsembleDownscaler(weights={"xgboost": 0.0, "random_forest": 0.0, "lightgbm": 0.0})
+
+    # Valid weights correctly normalized
+    ens = EnsembleDownscaler(weights={"xgboost": 1.0, "random_forest": 1.0, "lightgbm": 2.0})
+    assert ens.weights["xgboost"] == pytest.approx(0.25)
+    assert ens.weights["random_forest"] == pytest.approx(0.25)
+    assert ens.weights["lightgbm"] == pytest.approx(0.50)
+
+
+def test_ensemble_downscaler_save_load_roundtrip():
+    """EnsembleDownscaler saves all 3 models and metadata, restoring full predict capability."""
+    import tempfile
+    import xarray as xr
+    import pandas as pd
+    from ml_engine.config import DownscaleConfig
+    from ml_engine.downscaling.ensemble import EnsembleDownscaler
+
+    time = pd.date_range("2025-11-01", periods=6, freq="D")
+    H, W, factor = 4, 4, 2
+    rng = np.random.RandomState(42)
+
+    coarse = xr.Dataset(
+        {
+            "u10": (("time", "y", "x"), rng.randn(6, H, W).astype(np.float32)),
+            "v10": (("time", "y", "x"), rng.randn(6, H, W).astype(np.float32)),
+            "blh": (("time", "y", "x"), np.full((6, H, W), 500.0, dtype=np.float32)),
+            "sp": (("time", "y", "x"), np.full((6, H, W), 101300.0, dtype=np.float32)),
+            "t2m": (("time", "y", "x"), np.full((6, H, W), 300.0, dtype=np.float32)),
+        },
+        coords={"time": time, "y": np.arange(H), "x": np.arange(W)},
+    )
+    no2_filled = xr.DataArray(
+        np.maximum(10.0, 50.0 + 10.0 * rng.randn(6, H, W).astype(np.float32)),
+        coords={"time": time, "y": np.arange(H), "x": np.arange(W)},
+        dims=("time", "y", "x"),
+    )
+    fill_flag = xr.DataArray(
+        np.zeros((6, H, W), dtype=np.int8),
+        coords={"time": time, "y": np.arange(H), "x": np.arange(W)},
+        dims=("time", "y", "x"),
+    )
+    static = xr.Dataset(
+        {"road_density": (("y", "x"), rng.rand(H * factor, W * factor).astype(np.float32))},
+        coords={"y": np.arange(H * factor), "x": np.arange(W * factor)},
+    )
+
+    cfg = DownscaleConfig(n_estimators=5, validation_fraction=0.33, random_state=42)
+    ens = EnsembleDownscaler(cfg)
+    ens.fit(coarse, no2_filled, fill_flag, static, factor)
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        ens.save(tmpdir)
+        ens_loaded = EnsembleDownscaler.load(tmpdir, static)
+
+        pred_orig = ens.predict_day(coarse, no2_filled, 0)
+        pred_loaded = ens_loaded.predict_day(coarse, no2_filled, 0)
+
+        assert np.all(np.isfinite(pred_loaded))
+        np.testing.assert_allclose(pred_orig, pred_loaded, atol=1e-5)
+
+
+def test_explain_ensemble_downscaler_input_validation():
+    """explain_ensemble_downscaler raises on non-finite input."""
+    import xgboost as xgb
+    from ml_engine.downscaling.ensemble import EnsembleDownscaler
+    from ml_engine.xai import explain_ensemble_downscaler
+
+    ens = EnsembleDownscaler()
+    ens.xgb_model = xgb.XGBRegressor(n_estimators=5, random_state=0)
+    ens.xgb_model.fit(np.zeros((10, 4)), np.ones(10))
+
+    # Infinite or NaN feature values
+    with pytest.raises(ValueError, match="finite"):
+        explain_ensemble_downscaler(ens, np.array([1.0, np.nan, 2.0, 3.0]))
+

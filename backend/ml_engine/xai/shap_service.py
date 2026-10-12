@@ -207,17 +207,20 @@ def explain_ensemble_downscaler(
     if not hasattr(ensemble, "xgb_model") or ensemble.xgb_model is None:
         raise RuntimeError("EnsembleDownscaler is not fitted — call fit() or load() first")
 
+    x_1d = np.asarray(X_row, dtype=np.float32).ravel()
+    if not np.all(np.isfinite(x_1d)):
+        raise ValueError("X_row features must be all finite values (no NaN or Inf)")
+
     # Resolve feature names
     names = feature_names
     if names is None and hasattr(ensemble, "features") and ensemble.features and ensemble.features is not True:
         names = ensemble.features.feature_names
     if names is None:
-        n_feats = np.asarray(X_row).ravel().shape[0]
+        n_feats = x_1d.shape[0]
         names = [f"feature_{i}" for i in range(n_feats)]
 
     # --- SHAP on XGBoost component ---
     xgb_service = SHAPService(model=ensemble.xgb_model, feature_names=list(names))
-    x_1d = np.asarray(X_row, dtype=np.float32).ravel()
     xgb_pred = float(ensemble.xgb_model.predict(x_1d.reshape(1, -1))[0])
     base_explanation = xgb_service.explain_instance(x_1d, predicted_val=xgb_pred, location_label=location_label)
 
@@ -237,11 +240,16 @@ def explain_ensemble_downscaler(
     # Rebuild with combined confidence; all chart data stays from XGBoost SHAP
     return XAIExplanation(
         executive_summary=(
-            f"{base_explanation.executive_summary} "
-            f"[Ensemble inter-model disagreement: {model_disagree:.3f} µmol m⁻² · "
+            f"[XGBoost Component SHAP] {base_explanation.executive_summary} "
+            f"[Ensemble: prediction={float(ens_res.prediction[0] if hasattr(ens_res.prediction, '__getitem__') else ens_res.prediction):.2f} µmol m⁻², "
+            f"Ensemble inter-model disagreement: {model_disagree:.3f} µmol m⁻², "
             f"model-agreement confidence: {model_agree_conf:.2f}]"
         ),
-        detailed_narrative=base_explanation.detailed_narrative,
+        detailed_narrative=(
+            f"Feature attributions are derived from TreeSHAP on the primary XGBoost component "
+            f"(weight={ensemble.weights.get('xgboost', 0.5):.2f}). "
+            f"{base_explanation.detailed_narrative}"
+        ),
         top_contributors=base_explanation.top_contributors,
         positive_contributors=base_explanation.positive_contributors,
         negative_contributors=base_explanation.negative_contributors,

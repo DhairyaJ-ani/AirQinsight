@@ -69,13 +69,13 @@ def _product(day: pd.Timestamp) -> str:
 
 
 def _run_dir(bbox: tuple[float, float, float, float], day: pd.Timestamp, source: str = "gee",
-             stations_csv: str | None = None) -> Path:
+             stations_csv: str | None = None, use_ensemble: bool = False) -> Path:
     """Where the run for this area, day and inputs lives (cache key)."""
     start = day - timedelta(days=WINDOW_DAYS - 1)
     bbox = tuple(round(float(v), 3) for v in bbox)
     model_tag = PRETRAINED_SURFACE_MODEL.stat().st_mtime_ns if PRETRAINED_SURFACE_MODEL.exists() else 0
     key = hashlib.sha1(json.dumps([RUN_FORMAT, bbox, str(start.date()), str(day.date()), _product(day), source,
-                                   model_tag, stations_csv]).encode()).hexdigest()[:16]
+                                   model_tag, stations_csv, use_ensemble]).encode()).hexdigest()[:16]
     return RUNS_ROOT / key
 
 
@@ -86,7 +86,7 @@ def _run(bbox: tuple[float, float, float, float], day: pd.Timestamp, ee_project:
     start = day - timedelta(days=WINDOW_DAYS - 1)
     product = _product(day)
     bbox = tuple(round(float(v), 3) for v in bbox)
-    run_dir = _run_dir(bbox, day, source, stations_csv)
+    run_dir = _run_dir(bbox, day, source, stations_csv, use_ensemble)
     key = run_dir.name
     with _lock_for(key):
         if (run_dir / "report.json").exists():

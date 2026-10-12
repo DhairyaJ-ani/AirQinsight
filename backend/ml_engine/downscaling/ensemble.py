@@ -39,6 +39,7 @@ ENSEMBLE_META_FILE = "ensemble_metadata.json"
 XGB_FILE = "xgb_downscaler.json"
 RF_FILE = "rf_downscaler.pkl"
 LGB_FILE = "lgb_downscaler.txt"
+LGB_PKL_FILE = "lgb_downscaler.pkl"
 
 
 @dataclass
@@ -69,9 +70,13 @@ class EnsembleDownscaler:
     ):
         self.cfg = cfg or DownscaleConfig()
         self.weights = weights or dict(self.DEFAULT_WEIGHTS)
-        # Normalize weights
+        # Validate and normalize weights
+        if not self.weights or any(w < 0 for w in self.weights.values()):
+            raise ValueError(f"Ensemble weights must be non-negative: {self.weights}")
         total_w = sum(self.weights.values())
-        self.weights = {k: v / total_w for k, v in self.weights.items()}
+        if total_w <= 0:
+            raise ValueError(f"Sum of ensemble weights must be positive, got {total_w}")
+        self.weights = {k: float(v) / total_w for k, v in self.weights.items()}
 
         self.xgb_model: xgb.XGBRegressor | None = None
         self.rf_model: RandomForestRegressor | None = None
@@ -326,7 +331,10 @@ class EnsembleDownscaler:
         self.xgb_model.save_model(model_dir / XGB_FILE)
         with open(model_dir / RF_FILE, "wb") as f:
             pickle.dump(self.rf_model, f)
-        self.lgb_model.booster_.save_model(str(model_dir / LGB_FILE))
+        with open(model_dir / LGB_PKL_FILE, "wb") as f:
+            pickle.dump(self.lgb_model, f)
+        if hasattr(self.lgb_model, "booster_") and self.lgb_model.booster_ is not None:
+            self.lgb_model.booster_.save_model(str(model_dir / LGB_FILE))
 
         (model_dir / ENSEMBLE_META_FILE).write_text(json.dumps(self.metadata, indent=2))
         return model_dir
@@ -359,11 +367,20 @@ class EnsembleDownscaler:
             obj.rf_model = RandomForestRegressor(n_estimators=30, max_depth=8, random_state=42)
 
         # Load LGB
-        lgb_path = model_dir / LGB_FILE
-        if lgb_path.exists():
+        lgb_pkl_path = model_dir / LGB_PKL_FILE
+        lgb_txt_path = model_dir / LGB_FILE
+        if lgb_pkl_path.exists():
+            with open(lgb_pkl_path, "rb") as f:
+                obj.lgb_model = pickle.load(f)
+        elif lgb_txt_path.exists():
             obj.lgb_model = lgb.LGBMRegressor()
-            booster = lgb.Booster(model_file=str(lgb_path))
+            booster = lgb.Booster(model_file=str(lgb_txt_path))
             obj.lgb_model._Booster = booster
+            obj.lgb_model.fitted_ = True
+            n_feats = len(meta.get("feature_names", []))
+            if n_feats:
+                obj.lgb_model.n_features_in_ = n_feats
+                obj.lgb_model._n_features = n_feats
         else:
             obj.lgb_model = lgb.LGBMRegressor(n_estimators=50, random_state=42, verbosity=-1)
 

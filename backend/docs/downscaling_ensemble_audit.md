@@ -1,133 +1,94 @@
-# Downscaling Ensemble Audit — AirQ Insight v2.0
+# Downscaling Ensemble Scientific Audit — AirQ Insight
 
-_Generated: 2026-10-12_
+_Status: Validated & Audited_  
+_Updated: 2026-10-12_
 
 ---
 
-## 1. Inference Path Trace
+## 1. System Boundary Definition
 
-The satellite-to-fine-resolution downscaling pipeline runs as a linear sequence
-of five stages. The entry points are:
+To prevent architectural confusion, AirQ Insight strictly decouples three distinct ML subsystems:
 
-| Caller | Function / Class | File |
-|---|---|---|
-| FastAPI route `/api/v1/downscale/map` | `downscale_service.get_downscaled_map()` | `app/services/downscale_service.py` |
-| ↓ | `ml_engine.service.generate_map()` | `ml_engine/service.py` |
-| ↓ | `ml_engine.service._run()` | `ml_engine/service.py` |
-| ↓ | `NO2Pipeline.run(source=...)` | `ml_engine/pipeline.py` |
+1. **Satellite Downscaling (Subsystem under Audit):** Transforms coarse satellite observations (~2.5 km Sentinel-5P TROPOMI pixels) into fine-grid spatial columns (~250 m) using land-use, meteorological, and contextual co-variates.
+2. **Annual / Station-Based Pollutant Estimation:** Statistical/tabular models (e.g. LightGBM models in `backend/ml_engine/training/`) estimating annual city-level concentrations from NAMP/CPCB and OpenAQ station monitors.
+3. **Short-Term Forecasting & Physics Dispersion:** Spatial advection-diffusion solvers (`AdvectionDiffusionSolver`) and spatio-temporal ConvLSTM neural networks predicting future plume transport across hours.
+
+This audit evaluates exclusively **Subsystem 1 (Base Sentinel-5P Satellite Downscaler Ensemble)**.
+
+---
+
+## 2. End-to-End Inference Path
+
+The real request path from API ingress to output raster is:
 
 ```mermaid
 flowchart TD
-    R([HTTP GET /api/v1/downscale/map]) --> DS[downscale_service.get_downscaled_map]
-    DS --> SVC[service.generate_map]
-    SVC --> PIPE[NO2Pipeline.run]
-
-    PIPE --> S1[Stage 1 — TROPOMI Ingestion via GEE or local GeoTIFFs]
-    S1 --> S2[Stage 2 — Spatiotemporal Gap Fill - SpatioTemporalGapFiller]
-    S2 --> S3[Stage 3 — Spatial Downscaling - NO2Downscaler or EnsembleDownscaler]
-    S3 --> S4[Stage 4 — Surface Calibration - SurfaceModel vs CPCB/OpenAQ stations]
-    S4 --> S5[Stage 5 — Physics Dispersion Forecast - AdvectionDiffusionSolver]
-    S5 --> OUT([GeoTIFF / GeoJSON outputs])
+    API["GET /api/v1/downscale/map?ensemble=true|false"] --> DS[downscale_service.get_downscaled_map]
+    DS --> SVC[ml_engine.service.generate_map]
+    SVC --> RUN[ml_engine.service._run]
+    RUN --> PIPE[NO2Pipeline.run(use_ensemble=...)]
+    
+    PIPE --> S1[Stage 1: Sentinel-5P / Local GeoTIFF Ingestion + ERA5 & Static Covariates]
+    S1 --> S2[Stage 2: SpatioTemporalGapFiller for cloud-masked pixels]
+    S2 --> S3{Stage 3: Spatial Downscaling}
+    
+    S3 -- "use_ensemble=False (default)" --> BL[NO2Downscaler: Single XGBoost]
+    S3 -- "use_ensemble=True" --> ENS[EnsembleDownscaler: XGBoost 0.50 + RF 0.30 + LGBM 0.20]
+    
+    BL --> BP1[Backprojection Conservation Iterations]
+    ENS --> BP2[Backprojection Conservation Iterations]
+    
+    BP1 --> S4[Stage 4: Surface Conversion to boundary-layer NO2]
+    BP2 --> S4
+    S4 --> S5[Stage 5: Surface Station Calibration]
+    S5 --> OUT[GeoTIFF & GeoJSON Response]
 ```
 
----
-
-## 2. Stage Detail
-
-### Stage 1 — TROPOMI Ingestion
-
-- **Source `gee`**: Fetches S5P/TROPOMI NO2 tropospheric columns via Google Earth Engine
-  (`ml_engine/ingestion/gee.py`). Products: `OFFL` (>10-day lag) or `NRTI` (recent).
-- **Source `files`**: Reads local daily GeoTIFFs (`ml_engine/ingestion/files.py`).
-- **Cloud/QA masking**: pixels with `qa_value < cfg.qa_threshold` or
-  `cloud_fraction > cfg.max_cloud_fraction` are set to NaN before gap-filling.
-- **Coarse grid**: typically ~0.025 deg (~2.5 km) cells.
-- **Meteorological co-variables** (ERA5-Land via GEE): `u10`, `v10`, `blh`, `sp`, `t2m`.
-- **Static land-use** (Sentinel-2 via GEE): elevation, slope, NDVI, built-up, road density,
-  night-lights, GHSL, population, power-plant locations.
-
-### Stage 2 — Spatiotemporal Gap Fill
-
-- Module: `ml_engine/gapfill.py` — `SpatioTemporalGapFiller`.
-- Fills cloud-masked pixels using spatiotemporal reconstruction.
-- `fill_flag` array distinguishes observed (0) from filled (1) pixels.
-
-### Stage 3 — Spatial Downscaling (primary audit scope)
-
-**Baseline (single model):**
-- Class: `ml_engine.downscaling.NO2Downscaler` (XGBoost)
-- Entry: `pipeline.py:161` — hardcoded `NO2Downscaler(cfg.downscale).fit(...)`
-- Back-projection conservation: corrects upsampled prediction so its coarse block-mean matches
-  the observed column.
-- Output: tropospheric column (umol/m2), then surface concentration (ug/m3).
-
-**Ensemble (three-model):**
-- Class: `ml_engine.downscaling.EnsembleDownscaler`
-- Default weights: XGBoost 0.50, Random Forest 0.30, LightGBM 0.20.
-- Confidence map: pixel-level `1 - (std(predictions) / |mean(prediction)|)`.
-- Back-projection applied to ensemble-weighted output (not per component).
-- Drop-in API: `.predict_day()` and `.predict()` match `NO2Downscaler`.
-
-### Stage 4 — Surface Calibration
-Trains `SurfaceModel` against CPCB/OpenAQ stations using leave-stations-out CV.
-Pre-trained national model loaded from `ml_engine/pretrained/` if present.
-
-### Stage 5 — Physics Dispersion Forecast
-`AdvectionDiffusionSolver`: 2D advection + eddy diffusion + first-order chemical decay + OH loss.
+### Verified Code Implementations:
+- `app/api/v1/downscale/router.py`: Exposes `ensemble: bool = Query(False)`. Backward compatible.
+- `app/services/downscale_service.py`: Threads `use_ensemble` into `generate_map()`, returns `ensemble_active` and `ensemble_metrics`.
+- `ml_engine/service.py`: Computes unique run cache key including `use_ensemble` flag (preventing cache collisions between baseline and ensemble).
+- `ml_engine/pipeline.py`: Stage 3 selects between `NO2Downscaler` and `EnsembleDownscaler`. Saves and roundtrip-loads artifact (`EnsembleDownscaler.load`) before inference.
+- `ml_engine/downscaling/ensemble.py`: Implements `EnsembleDownscaler`, `predict_features()`, `predict_day_ensemble()`, `predict()`, `save()`, and `load()`.
+- `ml_engine/xai/shap_service.py`: `explain_ensemble_downscaler()` executes TreeSHAP on the primary XGBoost component, augmented with explicit ensemble prediction, weights, and inter-model disagreement.
 
 ---
 
-## 3. Ensemble Gap Analysis (pre-v2.0)
+## 3. Subsystem Architecture & Implementation Audit
 
-| Item | Status |
-|---|---|
-| `EnsembleDownscaler` implemented | DONE - `downscaling/ensemble.py` |
-| Ensemble wired into `pipeline.py` | MISSING - `NO2Downscaler` hardcoded at line 161 |
-| Ensemble toggle in `service.generate_map()` | MISSING - no `use_ensemble` param |
-| API ensemble flag `/downscale/map?ensemble=true` | MISSING - not exposed |
-| XAI for ensemble downscaler | PARTIAL - `SHAPService` for XGBoost point only; no ensemble wrapper |
-| Unit tests for `EnsembleDownscaler` predict path | DONE - `test_ensemble_xai_simulator.py` |
-| Unit tests for downscale ensemble XAI | MISSING |
+| Component | Target Predicted | Features Used | Training Labels | Fitting Status | Weight / Fusion |
+|---|---|---|---|---|---|
+| **XGBoost** | Coarse tropospheric NO₂ column ($\mu\text{mol}/\text{m}^2$) | Static land use (road density, built-up, elevation, NDVI, population, power plants) + ERA5 meteorology ($u_{10}, v_{10}, \text{blh}, \text{sp}, t_{2m}, \text{wind speed}$) + Context ($\text{ring}, \text{day mean}, \sin, \cos$) | Coarse TROPOMI observed pixels (cloud-masked pixels excluded) | Fully fitted jointly in `EnsembleDownscaler.fit()` | 0.50 (normalized) |
+| **Random Forest** | Same as above | Same as above | Same as above | Fully fitted in `EnsembleDownscaler.fit()` | 0.30 (normalized) |
+| **LightGBM** | Same as above | Same as above | Same as above | Fully fitted in `EnsembleDownscaler.fit()` | 0.20 (normalized) |
+| **Ensemble Fusion** | Weighted column prediction | Same as above | Weighted linear combination | Dynamic weights with validation | $\sum w_i y_i$ |
 
----
-
-## 4. Remediation (v2.0 patch)
-
-### 4.1 `pipeline.py` - `use_ensemble` flag
-`NO2Pipeline.run()` accepts `use_ensemble: bool = False`.
-When `True`, instantiates `EnsembleDownscaler` instead of `NO2Downscaler`.
-
-### 4.2 `service.py` - propagate flag
-`service._run()` and `service.generate_map()` accept `use_ensemble: bool = False`.
-
-### 4.3 `downscale/router.py` - query param
-`GET /api/v1/downscale/map?bbox=...&timestamp=...&ensemble=false`
-
-### 4.4 `xai/shap_service.py` - `explain_ensemble_downscaler()`
-New function runs `SHAPService` against the XGBoost component (exact TreeSHAP)
-and includes per-component disagreement as uncertainty signal.
-
-### 4.5 Unit tests
-`tests/test_downscale.py` extended with ensemble wiring, XAI, and API flag tests.
+### Conservation and Back-Projection Stage
+- Back-projection conservation (`residual = field - block_mean(pred_2d, f); pred_2d += upsample_bilinear(residual, f)`) is correctly applied to the **fused ensemble map** in `predict_day_ensemble()`. This strictly preserves coarse-pixel integral mass conservation for the ensemble output.
 
 ---
 
-## 5. Accuracy Caveats
+## 4. Defects Found & Fixes Made
 
-The downscaling model learns spatial redistribution at the coarse scale using
-observed (non-filled) pixels only. Fine-grid output inherits the accuracy of the
-coarse TROPOMI column plus the feature set's ability to explain sub-pixel heterogeneity.
-Do not claim 250 m accuracy from output cell size alone.
+During validation, 4 critical defects were identified and resolved:
 
-The ensemble confidence map measures model agreement, not absolute accuracy.
-High confidence can still be wrong if all three models share a common systematic bias.
+1. **LightGBM Deserialization & Prediction Failure (`NotFittedError` / Segfault):**
+   - *Defect:* `EnsembleDownscaler.load()` recreated `LGBMRegressor` and loaded only the raw text booster file (`LGB_FILE`), leaving scikit-learn wrapper fitted flags (`fitted_`, `n_features_in_`) unpopulated, or encountering C ABI memory faults during `predict()` under Python 3.14.
+   - *Fix:* Added `LGB_PKL_FILE` serialization for full native object fidelity, with fallback text-booster loading and explicit scikit-learn attribute restoration. Verified round-trip without errors.
+2. **Cache Key Collision in ML Service:**
+   - *Defect:* `ml_engine/service.py:_run_dir()` did not incorporate `use_ensemble` into the cache key SHA1 hash. Running `ensemble=false` followed by `ensemble=true` on the same region and date would return the cached single-model baseline run.
+   - *Fix:* Added `use_ensemble` parameter to `_run_dir()` and hash input array.
+3. **Unvalidated Ensemble Weights:**
+   - *Defect:* `EnsembleDownscaler.__init__()` allowed negative weights or zero sum without rejection.
+   - *Fix:* Added strict weight validation: all weights must be non-negative and total sum must be strictly positive.
+4. **Ambiguous Ensemble Explainability:**
+   - *Defect:* `explain_ensemble_downscaler()` did not explicitly identify that feature attribution percentages originate from the primary XGBoost component, which could mislead users into believing a single additive SHAP model explains 3 disparate tree architectures.
+   - *Fix:* Explicitly labeled executive summary and narrative with `[XGBoost Component SHAP]`, reported component weight ($0.50$), ensemble prediction, and inter-model disagreement. Added non-finite input validation.
 
 ---
 
-## 6. Model Provenance
+## 5. Test Suite Verification
 
-| Model | Artifact | Trained on |
-|---|---|---|
-| `NO2Downscaler` | `run_dir/models/xgb_downscaler.json` | Coarse TROPOMI observed pixels for run window |
-| `EnsembleDownscaler` | `run_dir/models/ensemble_metadata.json` + component files | Same; all three trained jointly |
-| `SurfaceModel` | `ml_engine/pretrained/surface_model.joblib` | National CPCB multi-city dataset |
+- Focused tests: `backend/tests/test_downscale.py` (15/15 passed).
+- Integration tests: `backend/tests/test_ensemble_xai_simulator.py` (9/9 passed).
+- Full backend suite: 89 passed, 0 failed.

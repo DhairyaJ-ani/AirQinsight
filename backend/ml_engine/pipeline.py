@@ -163,7 +163,8 @@ class NO2Pipeline:
             with self._timer("downscale_train"):
                 report["ensemble_downscaler"] = downscaler.fit(coarse, gf.filled, gf.flag, static, cfg.refine_factor)
             downscaler.save(cfg.model_dir)
-            log.info("Ensemble downscaler trained and saved to %s", cfg.model_dir)
+            downscaler = EnsembleDownscaler.load(cfg.model_dir, static)  # round-trip proves the artifact is loadable
+            log.info("Ensemble downscaler trained, saved, and roundtrip verified at %s", cfg.model_dir)
         else:
             downscaler = NO2Downscaler(cfg.downscale)
             with self._timer("downscale_train"):
