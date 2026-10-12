@@ -16,7 +16,7 @@ import xarray as xr
 from . import export
 from .config import PipelineConfig
 from .dispersion import AdvectionDiffusionSolver, transport_summary
-from .downscaling import NO2Downscaler
+from .downscaling import NO2Downscaler, EnsembleDownscaler
 from .gapfill import SpatioTemporalGapFiller
 from .grid import GridSpec, upsample_bilinear
 from .ingestion import load_stations_csv, quality_control, road_density_from_geojson
@@ -134,7 +134,7 @@ class NO2Pipeline:
     # ---------------------------------------------------------------- full run
     def run(self, source: str = "synthetic", stations_csv: str | None = None, roads_geojson: str | None = None,
             ee_project: str | None = None, seed: int = 0, export_outputs: bool = True,
-            input_dir: str | None = None) -> PipelineResult:
+            input_dir: str | None = None, use_ensemble: bool = False) -> PipelineResult:
         cfg = self.cfg
         out_dir = Path(cfg.output_dir)
         if export_outputs:
@@ -158,11 +158,18 @@ class NO2Pipeline:
         gapfilled = gf.to_dataset()
 
         # Stage 2 ------------------------------------------------------------------------------
-        downscaler = NO2Downscaler(cfg.downscale)
-        with self._timer("downscale_train"):
-            report["downscaler"] = downscaler.fit(coarse, gf.filled, gf.flag, static, cfg.refine_factor)
-        downscaler.save(cfg.model_dir)
-        downscaler = NO2Downscaler.load(cfg.model_dir, static)  # round-trip proves the artefact is loadable
+        if use_ensemble:
+            downscaler: NO2Downscaler | EnsembleDownscaler = EnsembleDownscaler(cfg.downscale)
+            with self._timer("downscale_train"):
+                report["ensemble_downscaler"] = downscaler.fit(coarse, gf.filled, gf.flag, static, cfg.refine_factor)
+            downscaler.save(cfg.model_dir)
+            log.info("Ensemble downscaler trained and saved to %s", cfg.model_dir)
+        else:
+            downscaler = NO2Downscaler(cfg.downscale)
+            with self._timer("downscale_train"):
+                report["downscaler"] = downscaler.fit(coarse, gf.filled, gf.flag, static, cfg.refine_factor)
+            downscaler.save(cfg.model_dir)
+            downscaler = NO2Downscaler.load(cfg.model_dir, static)  # round-trip proves the artefact is loadable
         with self._timer("downscale_inference"):
             column_fine = downscaler.predict(coarse, gf.filled, self.fine_grid.x, self.fine_grid.y)
         pbl_conc = downscaler.to_surface(column_fine, coarse)

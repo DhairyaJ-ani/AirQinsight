@@ -31,6 +31,7 @@ async def get_downscaled_map(
     user_id: str,
     bbox: str,
     timestamp: str,
+    use_ensemble: bool = False,
 ) -> DownscaleMapResponse:
     """
     Return the ML engine's 250 m ground-level NO2 map for a bounding box and date.
@@ -43,6 +44,7 @@ async def get_downscaled_map(
         user_id: UUID of the requesting user (for activity logging).
         bbox: Bounding box string "min_lon,min_lat,max_lon,max_lat", e.g. "72.8,18.9,73.1,19.2".
         timestamp: ISO 8601 date/datetime; the map for that calendar day is returned.
+        use_ensemble: If True, activates the three-model ensemble downscaler.
     """
     parsed_bbox = _parse_bbox(bbox)
 
@@ -50,12 +52,16 @@ async def get_downscaled_map(
         supabase,
         user_id,
         "VIEW_DOWNSCALED_MAP",
-        {"bbox": bbox, "timestamp": timestamp},
+        {"bbox": bbox, "timestamp": timestamp, "ensemble": use_ensemble},
     )
 
     try:
         result = await asyncio.to_thread(
-            generate_map, bbox=tuple(parsed_bbox), date=timestamp[:10], ee_project=settings.EE_PROJECT
+            generate_map,
+            bbox=tuple(parsed_bbox),
+            date=timestamp[:10],
+            ee_project=settings.EE_PROJECT,
+            use_ensemble=use_ensemble,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
@@ -75,4 +81,6 @@ async def get_downscaled_map(
         hazard_geojson_url=_file_url(result["hazard_geojson"]),
         netcdf_url=_file_url(result["surface_netcdf"]),
         metrics=result["metrics"],
+        ensemble_active=result.get("ensemble", False),
+        ensemble_metrics=result.get("ensemble_metrics") or None,
     )

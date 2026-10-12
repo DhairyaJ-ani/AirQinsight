@@ -179,3 +179,76 @@ _shap_service = SHAPService()
 
 def get_shap_service() -> SHAPService:
     return _shap_service
+
+
+def explain_ensemble_downscaler(
+    ensemble,  # EnsembleDownscaler — avoid circular import by using Any-compatible typing
+    X_row: np.ndarray,
+    feature_names: "Sequence[str] | None" = None,
+    location_label: str = "Target Location",
+) -> "XAIExplanation":
+    """Explain a single spatial cell predicted by :class:`~ml_engine.downscaling.EnsembleDownscaler`.
+
+    Runs exact TreeSHAP on the XGBoost component (Component A) — the highest-weight model —
+    and enriches the :class:`XAIExplanation` with inter-model disagreement as an additional
+    epistemic-uncertainty signal.
+
+    Args:
+        ensemble: Fitted ``EnsembleDownscaler`` instance.
+        X_row: 1-D or 2-D (1 × F) feature array for the pixel to explain.
+        feature_names: Feature names matching ``X_row`` columns. Falls back to
+            ``ensemble.features.feature_names`` if available.
+        location_label: Human-readable label for chart titles.
+
+    Returns:
+        :class:`XAIExplanation` with ``confidence`` reflecting both SHAP attribution
+        confidence and ensemble model agreement (geometric mean).
+    """
+    if not hasattr(ensemble, "xgb_model") or ensemble.xgb_model is None:
+        raise RuntimeError("EnsembleDownscaler is not fitted — call fit() or load() first")
+
+    # Resolve feature names
+    names = feature_names
+    if names is None and hasattr(ensemble, "features") and ensemble.features and ensemble.features is not True:
+        names = ensemble.features.feature_names
+    if names is None:
+        n_feats = np.asarray(X_row).ravel().shape[0]
+        names = [f"feature_{i}" for i in range(n_feats)]
+
+    # --- SHAP on XGBoost component ---
+    xgb_service = SHAPService(model=ensemble.xgb_model, feature_names=list(names))
+    x_1d = np.asarray(X_row, dtype=np.float32).ravel()
+    xgb_pred = float(ensemble.xgb_model.predict(x_1d.reshape(1, -1))[0])
+    base_explanation = xgb_service.explain_instance(x_1d, predicted_val=xgb_pred, location_label=location_label)
+
+    # --- Inter-model disagreement (epistemic uncertainty) ---
+    try:
+        ens_res = ensemble.predict_features(x_1d.reshape(1, -1))
+        model_disagree = float(ens_res.disagreement)
+        model_agree_conf = float(ens_res.confidence)
+    except Exception as exc:
+        log.warning("Could not compute ensemble disagreement for XAI: %s", exc)
+        model_disagree = 0.0
+        model_agree_conf = 0.9
+
+    # Geometric-mean blend of SHAP attribution confidence and model agreement
+    combined_confidence = round((base_explanation.confidence * model_agree_conf) ** 0.5, 3)
+
+    # Rebuild with combined confidence; all chart data stays from XGBoost SHAP
+    return XAIExplanation(
+        executive_summary=(
+            f"{base_explanation.executive_summary} "
+            f"[Ensemble inter-model disagreement: {model_disagree:.3f} µmol m⁻² · "
+            f"model-agreement confidence: {model_agree_conf:.2f}]"
+        ),
+        detailed_narrative=base_explanation.detailed_narrative,
+        top_contributors=base_explanation.top_contributors,
+        positive_contributors=base_explanation.positive_contributors,
+        negative_contributors=base_explanation.negative_contributors,
+        waterfall_chart_url=base_explanation.waterfall_chart_url,
+        beeswarm_chart_url=base_explanation.beeswarm_chart_url,
+        bar_chart_url=base_explanation.bar_chart_url,
+        base_value=base_explanation.base_value,
+        predicted_value=base_explanation.predicted_value,
+        confidence=combined_confidence,
+    )

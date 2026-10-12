@@ -80,7 +80,8 @@ def _run_dir(bbox: tuple[float, float, float, float], day: pd.Timestamp, source:
 
 
 def _run(bbox: tuple[float, float, float, float], day: pd.Timestamp, ee_project: str | None,
-         source: str = "gee", stations_csv: str | None = None) -> Path:
+         source: str = "gee", stations_csv: str | None = None,
+         use_ensemble: bool = False) -> Path:
     """Run (or reuse) the pipeline for the WINDOW_DAYS ending on ``day``; returns the run directory."""
     start = day - timedelta(days=WINDOW_DAYS - 1)
     product = _product(day)
@@ -94,8 +95,10 @@ def _run(bbox: tuple[float, float, float, float], day: pd.Timestamp, ee_project:
                              output_dir=run_dir, model_dir=run_dir / "models", s5p_product=product)
         if source == "gee" and PRETRAINED_SURFACE_MODEL.exists():
             cfg.surface_model_path = PRETRAINED_SURFACE_MODEL
-        log.info("ML engine run %s: bbox=%s %s..%s (%s)", key, bbox, start.date(), day.date(), product)
-        NO2Pipeline(cfg).run(source=source, stations_csv=stations_csv, ee_project=ee_project)
+        log.info("ML engine run %s: bbox=%s %s..%s (%s) ensemble=%s",
+                 key, bbox, start.date(), day.date(), product, use_ensemble)
+        NO2Pipeline(cfg).run(source=source, stations_csv=stations_csv,
+                             ee_project=ee_project, use_ensemble=use_ensemble)
     return run_dir
 
 
@@ -155,23 +158,34 @@ def cached_runs(bbox: tuple[float, float, float, float], day: pd.Timestamp,
 
 def generate_map(bbox: tuple[float, float, float, float] | None = None, date: str | date_cls | None = None,
                  city: str | None = None, ee_project: str | None = None, source: str = "gee",
-                 stations_csv: str | None = None) -> dict:
+                 stations_csv: str | None = None, use_ensemble: bool = False) -> dict:
     """250 m ground-level NO2 map for ``date`` (default: yesterday) over ``bbox`` or ``city``.
 
     Returns the day's GeoTIFF / GeoJSON paths, the full-period NetCDF, grid metadata and the accuracy
-    figures of the models used.
+    figures of the models used. Pass ``use_ensemble=True`` to activate the three-model ensemble
+    downscaler (XGBoost + Random Forest + LightGBM) instead of the single XGBoost baseline.
     """
     if (bbox is None) == (city is None):
         raise ValueError("Pass exactly one of bbox or city")
     bbox = city_bbox(city) if city else tuple(bbox)
     day = _parse_date(date)
-    run_dir = _run(bbox, day, ee_project or os.environ.get("EE_PROJECT"), source, stations_csv)
+    run_dir = _run(bbox, day, ee_project or os.environ.get("EE_PROJECT"), source, stations_csv, use_ensemble)
     report = json.loads((run_dir / "report.json").read_text())
     daily = report["outputs"]["daily"].get(str(day.date()))
     if daily is None:
         raise RuntimeError(f"Run {run_dir} has no output for {day.date()}")
     fine = report["grids"]["fine"]
     pretrained = report.get("pretrained_surface_model", {})
+    # Support both single-model ("downscaler" key) and ensemble ("ensemble_downscaler" key) reports
+    ds_report = report.get("ensemble_downscaler") or report.get("downscaler", {})
+    holdout = (ds_report.get("temporal_holdout_ensemble") or ds_report.get("temporal_holdout_coarse") or {})
+    ensemble_metrics: dict = {}
+    if use_ensemble:
+        ensemble_metrics = {
+            "model_holdouts": ds_report.get("model_holdouts", {}),
+            "validation_disagreement": ds_report.get("validation_disagreement"),
+            "weights": ds_report.get("weights", {}),
+        }
     return {
         "bbox": list(bbox),
         "date": str(day.date()),
@@ -185,13 +199,15 @@ def generate_map(bbox: tuple[float, float, float, float] | None = None, date: st
         "surface_netcdf": report["outputs"]["surface_nc"],
         "units": "ug m-3",
         "s5p_product": report["config"]["s5p_product"],
+        "ensemble": use_ensemble,
         "metrics": {
             "gapfill_holdout_r2": report["gapfill_holdout"]["all"]["r2"],
-            "downscale_holdout_r2": report["downscaler"]["temporal_holdout_coarse"]["r2"],
+            "downscale_holdout_r2": holdout.get("r2"),
             "surface_model": pretrained.get("model"),
             "surface_model_validation": _pretrained_validation(),
             "independent_test": pretrained.get("independent_test", {}).get("overall"),
         },
+        "ensemble_metrics": ensemble_metrics,
         "run_dir": str(run_dir),
     }
 

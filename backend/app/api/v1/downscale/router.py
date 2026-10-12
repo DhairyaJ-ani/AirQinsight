@@ -142,6 +142,11 @@ async def get_hotspots(
 async def get_map(
     bbox: str,
     timestamp: str,
+    ensemble: bool = Query(
+        False,
+        description="Set true to use the three-model ensemble downscaler (XGBoost + RF + LightGBM) "
+                    "instead of the single-model XGBoost baseline.",
+    ),
     current_user: dict = Depends(get_current_user),
 ) -> DownscaleMapResponse:
     """
@@ -149,10 +154,13 @@ async def get_map(
 
     - **bbox**: Comma-separated float coordinates: min_lon,min_lat,max_lon,max_lat
     - **timestamp**: ISO 8601 datetime string for the observation time
+    - **ensemble**: Activate three-model ensemble downscaler (default false)
     """
     supabase = get_supabase()
     user_id = str(current_user["id"])
-    return await downscale_service.get_downscaled_map(supabase, user_id, bbox, timestamp)
+    return await downscale_service.get_downscaled_map(
+        supabase, user_id, bbox, timestamp, use_ensemble=ensemble
+    )
 
 
 @router.get(

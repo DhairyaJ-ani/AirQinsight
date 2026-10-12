@@ -1,7 +1,9 @@
 import pytest
+import numpy as np
 from unittest.mock import MagicMock, patch
 
 from ml_engine.service import RUNS_ROOT
+
 
 _RUN = RUNS_ROOT / "abc123"
 FAKE_MAP = {
@@ -144,3 +146,102 @@ async def test_get_geotiff_stream(auth_client):
     assert response.status_code == 200
     assert response.headers["content-type"] == "image/tiff"
     assert len(response.content) > 0
+
+
+# ---------------------------------------------------------------------------
+# Ensemble downscaler pipeline wiring
+# ---------------------------------------------------------------------------
+
+
+def test_ensemble_downscaler_use_ensemble_flag():
+    """NO2Pipeline.run() accepts use_ensemble=True without signature error."""
+    import inspect
+    from ml_engine.pipeline import NO2Pipeline
+
+    sig = inspect.signature(NO2Pipeline.run)
+    assert "use_ensemble" in sig.parameters, "use_ensemble param missing from NO2Pipeline.run()"
+    param = sig.parameters["use_ensemble"]
+    assert param.default is False, "use_ensemble should default to False"
+
+
+# ---------------------------------------------------------------------------
+# Ensemble downscaler XAI — explain_ensemble_downscaler
+# ---------------------------------------------------------------------------
+
+
+def test_explain_ensemble_downscaler_output_structure():
+    """explain_ensemble_downscaler returns a valid XAIExplanation with combined confidence."""
+    import xgboost as xgb
+    import lightgbm as lgb
+    from sklearn.ensemble import RandomForestRegressor
+    from ml_engine.downscaling.ensemble import EnsembleDownscaler
+    from ml_engine.xai import explain_ensemble_downscaler, XAIExplanation
+
+    N, D = 80, 8
+    rng = np.random.RandomState(0)
+    X = rng.randn(N, D).astype(np.float32)
+    y = 40.0 + 5.0 * X[:, 0] - 3.0 * X[:, 2] + rng.randn(N) * 2
+
+    ens = EnsembleDownscaler()
+    ens.xgb_model = xgb.XGBRegressor(n_estimators=8, max_depth=3, random_state=0)
+    ens.xgb_model.fit(X, y)
+    ens.rf_model = RandomForestRegressor(n_estimators=8, max_depth=4, random_state=0, n_jobs=1)
+    ens.rf_model.fit(X, y)
+    ens.lgb_model = lgb.LGBMRegressor(n_estimators=8, max_depth=3, random_state=0, n_jobs=1, verbosity=-1)
+    ens.lgb_model.fit(X, y)
+    ens.features = True  # signal that models are ready (FeatureBuilder sentinel)
+
+    feature_names = [f"f{i}" for i in range(D)]
+    x_row = X[0]
+
+    explanation = explain_ensemble_downscaler(ens, x_row, feature_names=feature_names)
+
+    assert isinstance(explanation, XAIExplanation)
+    assert 0.0 <= explanation.confidence <= 1.0, "confidence must be in [0, 1]"
+    assert explanation.predicted_value > 0
+    assert len(explanation.top_contributors) > 0
+    # Executive summary must mention ensemble disagreement
+    assert "Ensemble inter-model disagreement" in explanation.executive_summary
+
+
+def test_explain_ensemble_downscaler_raises_when_unfitted():
+    """explain_ensemble_downscaler raises RuntimeError if the ensemble is not trained."""
+    from ml_engine.downscaling.ensemble import EnsembleDownscaler
+    from ml_engine.xai import explain_ensemble_downscaler
+
+    ens = EnsembleDownscaler()  # not fitted
+    with pytest.raises(RuntimeError, match="not fitted"):
+        explain_ensemble_downscaler(ens, np.zeros(8))
+
+
+# ---------------------------------------------------------------------------
+# GET /api/v1/downscale/map — ensemble=true query param
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_get_map_ensemble_flag_threaded(auth_client):
+    """?ensemble=true is accepted and threaded through to generate_map."""
+    mock_supabase = MagicMock()
+    FAKE_MAP_ENS = {**FAKE_MAP, "ensemble": True, "ensemble_metrics": {"weights": {"xgboost": 0.5}}}
+
+    with patch("app.services.activity_service.log_activity"):
+        with patch("app.api.v1.downscale.router.get_supabase", return_value=mock_supabase):
+            with patch(
+                "app.services.downscale_service.generate_map",
+                return_value=FAKE_MAP_ENS,
+            ) as gen:
+                response = await auth_client.get(
+                    "/api/v1/downscale/map",
+                    params={
+                        "bbox": "72.8,18.9,73.1,19.2",
+                        "timestamp": "2024-01-15T10:00:00Z",
+                        "ensemble": "true",
+                    },
+                )
+
+    assert response.status_code == 200
+    # Verify the ensemble flag was forwarded to generate_map
+    assert gen.call_args.kwargs.get("use_ensemble") is True
+    data = response.json()
+    assert data["ensemble_active"] is True
