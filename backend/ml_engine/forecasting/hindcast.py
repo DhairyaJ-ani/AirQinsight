@@ -105,6 +105,18 @@ def _met_at(met: pd.DataFrame, t: pd.Timestamp) -> tuple[float, float]:
     return float(np.interp(tt, x, met["u10"].values)), float(np.interp(tt, x, met["v10"].values))
 
 
+def _blh_at(met: pd.DataFrame, t: pd.Timestamp) -> float | None:
+    """Boundary-layer height (m) at ``t`` from the met table, or None if the table has none there."""
+    if "blh" not in met.columns:
+        return None
+    ok = met["blh"].notna()
+    if not ok.any():
+        return None
+    x = met.index[ok].values.astype("datetime64[s]").astype(np.int64)
+    v = float(np.interp(np.datetime64(t, "s").astype(np.int64), x, met.loc[ok, "blh"].values))
+    return v if np.isfinite(v) else None
+
+
 def _wind_sequence(met: pd.DataFrame, t0: pd.Timestamp, shape: tuple[int, int], n_hours: int = 3):
     seq = []
     for k in range(n_hours):
@@ -125,16 +137,26 @@ def run_hindcast(
     tz_offset_h: float = 5.5,
     min_train_stations: int = 5,
     max_origins: int | None = None,
+    value_col: str = "no2",
+    max_value: float = 500.0,
+    t_min: str | pd.Timestamp | None = None,
+    t_max: str | pd.Timestamp | None = None,
+    use_blh: bool = True,
 ) -> pd.DataFrame:
-    """Return one row per (origin hour, held-out station, horizon) with every predictor's value."""
+    """Return one row per (origin hour, held-out station, horizon) with every predictor's value.
+
+    ``value_col``/``max_value`` select the pollutant and its plausibility cap. ``t_min``/``t_max`` restrict the
+    origin hours (UTC), which is how calibration and test periods are separated. With ``use_blh`` the met
+    table's ``blh`` (m) at the origin sets the mixing height for dry deposition.
+    """
     variants = variants or default_variants()
     grid = build_grid(bbox, res_m)
     solvers = {v.name: ImprovedPhysicsSolver(grid.h, grid.w, grid.dx, grid.dy, v.cfg) for v in variants}
 
     st = stations.copy()
     st["t_end"] = pd.to_datetime(st["time_utc"]) + pd.Timedelta(hours=1)
-    st = st[(st.no2 > 0) & (st.no2 <= 500)]   # exact zeros are missing-value codes, not clean air
-    obs = st.set_index(["station_id", "t_end"])["no2"]
+    st = st[(st[value_col] > 0) & (st[value_col] <= max_value)]   # exact zeros are missing-value codes, not clean air
+    obs = st.set_index(["station_id", "t_end"])[value_col]
     obs = obs[~obs.index.duplicated(keep="first")]
     ids = sorted(st.station_id.unique())
     fold_of = {sid: i % n_folds for i, sid in enumerate(ids)}
@@ -143,6 +165,10 @@ def run_hindcast(
 
     origins = sorted(st.t_end.unique())
     origins = [pd.Timestamp(t) for t in origins if ((pd.Timestamp(t) + pd.Timedelta(hours=tz_offset_h)).hour in t_hours_local)]
+    if t_min is not None:
+        origins = [t for t in origins if t >= pd.Timestamp(t_min)]
+    if t_max is not None:
+        origins = [t for t in origins if t < pd.Timestamp(t_max)]
     if max_origins:
         origins = origins[:: max(1, len(origins) // max_origins)]
 
@@ -159,7 +185,8 @@ def run_hindcast(
                 continue
             c0 = idw_field(grid, pos.loc[train, "lon"].values, pos.loc[train, "lat"].values, np.array([at0[s] for s in train]))
             wind = _wind_sequence(met, t0, (grid.h, grid.w))
-            frames = {name: dict(sv.forecast_frames(c0, wind)) for name, sv in solvers.items()}
+            blh = _blh_at(met, t0) if use_blh else None
+            frames = {name: dict(sv.forecast_frames(c0, wind, mixing_height_m=blh)) for name, sv in solvers.items()}
             r_idx, c_idx = grid.index(pos.loc[held, "lon"].values, pos.loc[held, "lat"].values)
             speed = float(np.hypot(*_met_at(met, t0)))
             for hmin in HORIZONS_MIN:
@@ -238,21 +265,28 @@ def main(argv=None) -> int:
     p.add_argument("--end", default="2022-02-28")
     p.add_argument("--res-m", type=float, default=500.0)
     p.add_argument("--city", default="mumbai", choices=sorted(CITY_BBOX))
+    p.add_argument("--pollutant", default="no2", choices=["no2", "pm25", "pm10", "so2", "co", "o3"])
     p.add_argument("--cache-dir", default=None, help="default: cache/hindcast/<city>")
     p.add_argument("--max-origins", type=int, default=None)
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
     bbox, cache = CITY_BBOX[args.city], args.cache_dir or f"cache/hindcast/{args.city}"
-    st = fetch_station_hours(bbox, args.start, args.end, cache)
+    st = fetch_station_hours(bbox, args.start, args.end, cache, pollutant=args.pollutant)
     met = fetch_hourly_met(bbox, args.start, args.end, cache)
-    df = run_hindcast(st, met, bbox, res_m=args.res_m, max_origins=args.max_origins)
+    if args.pollutant == "no2":
+        variants, max_value = None, 500.0
+    else:
+        variants = [Variant(f"physics_{args.pollutant}", PhysicsConfig.for_pollutant(args.pollutant, max_horizon_min=max(HORIZONS_MIN)))]
+        max_value = 1500.0 if args.pollutant in ("pm25", "pm10") else 500.0
+    df = run_hindcast(st, met, bbox, res_m=args.res_m, max_origins=args.max_origins, variants=variants,
+                      value_col=args.pollutant, max_value=max_value)
     out = Path(cache)
-    df.to_csv(out / "hindcast_samples.csv", index=False)
+    df.to_csv(out / f"hindcast_samples_{args.pollutant}.csv", index=False)
     summ = summarize(df)
-    summ.to_csv(out / "hindcast_summary.csv", index=False)
+    summ.to_csv(out / f"hindcast_summary_{args.pollutant}.csv", index=False)
     with pd.option_context("display.width", 200, "display.float_format", "{:.3f}".format):
         print(summ.to_string(index=False))
-        print(by_wind_speed(df, "physics_cubic").to_string(index=False))
+        print(by_wind_speed(df, [c for c in df.columns if c.startswith("physics_")][0]).to_string(index=False))
     return 0
 
 

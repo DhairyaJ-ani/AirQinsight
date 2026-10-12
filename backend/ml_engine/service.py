@@ -233,17 +233,48 @@ def _area_for_point(lat: float, lon: float) -> tuple[float, float, float, float]
     return (lon - h, lat - h, lon + h, lat + h)
 
 
+PHYSICS_SOLVERS = ("legacy", "improved")
+
+
+def _advect_surface(surface: np.ndarray, u: np.ndarray, v: np.ndarray, fine: GridSpec, horizons_h: list[int],
+                    step_h: int, solver: str) -> dict[int, np.ndarray]:
+    """Surface map advected to each horizon (hours) with one constant wind: ``{horizon_h: (H, W) field}``.
+
+    ``legacy`` is the original ``dispersion.AdvectionDiffusionSolver`` (bilinear, rescale-free). ``improved`` is
+    ``forecasting.physics.ImprovedPhysicsSolver`` with its NO2 defaults. Both use the same wind, diffusivity and
+    lifetime; they differ in numerics and in the mass handling at each export frame.
+    """
+    if solver == "legacy":
+        fc = AdvectionDiffusionSolver(fine, DispersionConfig(horizons_h=tuple(float(h) for h in horizons_h))).forecast(
+            surface, u, v)
+        return {h: fc.sel(horizon_h=float(h)).values for h in horizons_h}
+    if solver == "improved":
+        from .forecasting.config import PhysicsConfig
+        from .forecasting.physics import ImprovedPhysicsSolver
+
+        dx, dy = fine.pixel_size_m()
+        cfg = PhysicsConfig(export_interval_min=step_h * 60, max_horizon_min=max(horizons_h) * 60)
+        frames = dict(ImprovedPhysicsSolver(fine.height, fine.width, dx, dy, cfg).forecast_frames(
+            np.asarray(surface, dtype=np.float64), [(u, v)]))
+        return {h: frames[h * 60] for h in horizons_h}
+    raise ValueError(f"solver must be one of {PHYSICS_SOLVERS}, got {solver!r}")
+
+
 def forecast_point(lat: float, lon: float, hours: int, date: str | date_cls | None = None, step_h: int = 3,
-                   ee_project: str | None = None, source: str = "gee") -> dict:
+                   ee_project: str | None = None, source: str = "gee", solver: str = "legacy") -> dict:
     """NO2 (ug/m^3) and wind at (lat, lon) every ``step_h`` hours up to ``hours`` ahead of ``date``'s map.
 
     The day's 250 m surface map is advected with that day's ERA5 overpass-hour wind by the physics solver
-    (advection + eddy diffusion + chemical decay, persistent emissions). ``wind_direction`` follows the
+    (advection + eddy diffusion + chemical decay, persistent emissions). ``solver`` picks the implementation:
+    ``"legacy"`` (default, unchanged) or ``"improved"`` (see ``_advect_surface``); the improved solver is
+    not yet validated from satellite-derived maps, so it is opt-in. ``wind_direction`` follows the
     meteorological convention (degrees the wind blows *from*). ``confidence`` is indicative: the shipped
     model's median day-to-day correlation at unseen stations, decaying with lead time (e-folding 24 h).
     """
     if hours <= 0 or hours % step_h:
         raise ValueError(f"hours must be a positive multiple of {step_h}")
+    if solver not in PHYSICS_SOLVERS:
+        raise ValueError(f"solver must be one of {PHYSICS_SOLVERS}, got {solver!r}")
     day = _parse_date(date)
     bbox = _area_for_point(lat, lon)
     run_dir = _run(bbox, day, ee_project or os.environ.get("EE_PROJECT"), source)
@@ -257,8 +288,7 @@ def forecast_point(lat: float, lon: float, hours: int, date: str | date_cls | No
     u = upsample_bilinear(coarse["u10"].values.astype(np.float64), factor)
     v = upsample_bilinear(coarse["v10"].values.astype(np.float64), factor)
     horizons = list(range(step_h, hours + 1, step_h))
-    solver = AdvectionDiffusionSolver(fine, DispersionConfig(horizons_h=tuple(float(h) for h in horizons)))
-    forecast = solver.forecast(surface.values, u, v)
+    fields = _advect_surface(surface.values, u, v, fine, horizons, step_h, solver)
 
     row, col, inside = fine.index_of(np.array([lon]), np.array([lat]))
     if not inside[0]:
@@ -269,12 +299,12 @@ def forecast_point(lat: float, lon: float, hours: int, date: str | date_cls | No
     base_skill = _base_temporal_skill()
     predictions = [{
         "hour": h,
-        "no2_concentration": round(float(forecast.sel(horizon_h=float(h)).values[r, c]), 2),
+        "no2_concentration": round(float(fields[h][r, c]), 2),
         "wind_speed": round(speed, 2),
         "wind_direction": round(wind_from, 1),
         "confidence": round(max(0.0, base_skill * math.exp(-h / 24.0)), 2),
     } for h in horizons]
-    return {"lat": lat, "lon": lon, "hours": hours, "base_date": str(day.date()),
+    return {"lat": lat, "lon": lon, "hours": hours, "base_date": str(day.date()), "solver": solver,
             "current_no2": round(float(surface.values[r, c]), 2), "predictions": predictions}
 
 

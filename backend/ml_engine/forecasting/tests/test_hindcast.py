@@ -84,3 +84,19 @@ def test_idw_reproduces_a_constant_field_and_stays_in_range():
     np.testing.assert_allclose(idw_field(grid, lon, lat, np.array([30.0, 30.0, 30.0])), 30.0, rtol=1e-9)
     f = idw_field(grid, lon, lat, np.array([10.0, 50.0, 90.0]))
     assert 10.0 <= f.min() and f.max() <= 90.0
+
+
+def test_steady_source_keeps_the_map_fixed_under_constant_wind_and_moves_it_when_wind_changes():
+    from ml_engine.forecasting.hindcast_satellite import steady_source_forecast
+    from ml_engine.forecasting.physics import ImprovedPhysicsSolver
+
+    n = 40
+    rr, cc = np.mgrid[0:n, 0:n].astype(float)
+    c0 = 20.0 + 60.0 * np.exp(-(((cc - 12) ** 2 + (rr - 20) ** 2) / (2 * 3.0 ** 2)))
+    solver = ImprovedPhysicsSolver(n, n, 275.0, 275.0, PhysicsConfig(max_horizon_min=120))
+    steady = steady_source_forecast(solver, c0, lambda m: (np.full((n, n), 3.0), np.full((n, n), 1.0)))
+    for h in (60, 120):
+        np.testing.assert_allclose(steady[h], c0, atol=1e-9)
+    # a wind that turns after the origin breaks the balance, so the field must respond
+    turned = steady_source_forecast(solver, c0, lambda m: (np.full((n, n), 3.0 if m < 5 else -3.0), np.full((n, n), 1.0)))
+    assert np.abs(turned[120] - c0).max() > 1.0

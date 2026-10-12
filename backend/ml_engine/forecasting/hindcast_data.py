@@ -32,28 +32,44 @@ def select_sensors(bbox: tuple[float, float, float, float], start: str, end: str
     return s.reset_index(drop=True)
 
 
-def fetch_station_hours(bbox, start: str, end: str, cache_dir: str | Path = "cache/hindcast", tz_offset_h: float = 5.5) -> pd.DataFrame:
-    """Hourly NO₂ (µg/m³) for every sensor in ``bbox``: station_id, lat, lon, time_utc, no2."""
+def fetch_station_hours(bbox, start: str, end: str, cache_dir: str | Path = "cache/hindcast", tz_offset_h: float = 5.5,
+                        pollutant: str = "no2") -> pd.DataFrame:
+    """Hourly readings for every sensor in ``bbox`` (µg/m³; CO as OpenAQ reports it).
+
+    Columns: station_id, lat, lon, time_utc, and one value column named after the pollutant (``no2``, ``pm25``, ...).
+    """
     from ..ingestion.openaq import OpenAQClient, fetch_sensor_hours
 
-    cache = Path(cache_dir) / "openaq"
+    pollutant = pollutant.lower()
+    cache = Path(cache_dir) / ("openaq" if pollutant == "no2" else f"openaq_{pollutant}")
     cache.mkdir(parents=True, exist_ok=True)
-    sensors = select_sensors(bbox, start, end)
     client = OpenAQClient()
+    if pollutant == "no2":
+        sensors = select_sensors(bbox, start, end)
+    else:
+        from ..ingestion.openaq_multipollutant import fetch_sensor_hours_pollutant, list_pollutant_sensors
+
+        sensors_csv = cache / "sensors.csv"
+        if sensors_csv.exists():
+            sensors = pd.read_csv(sensors_csv)
+        else:
+            sensors = list_pollutant_sensors(client, pollutant, city_bbox=bbox)
+            sensors.to_csv(sensors_csv, index=False)
     frames = []
     for i, s in enumerate(sensors.itertuples(), 1):
         path = cache / f"sensor_{s.sensor_id}_{start}_{end}.csv.gz"
         if path.exists():
             hours = pd.read_csv(path)
         else:
-            hours = fetch_sensor_hours(client, int(s.sensor_id), start, end)
+            hours = (fetch_sensor_hours(client, int(s.sensor_id), start, end) if pollutant == "no2"
+                     else fetch_sensor_hours_pollutant(client, int(s.sensor_id), pollutant, start, end))
             hours.to_csv(path, index=False)
         log.info("[%d/%d] %-45s %6d hourly values", i, len(sensors), s.name[:45], len(hours))
         if len(hours):
             frames.append(hours.assign(station_id=int(s.sensor_id), lat=s.lat, lon=s.lon))
     out = pd.concat(frames, ignore_index=True)
     out["time_utc"] = pd.to_datetime(out["date"]) - pd.Timedelta(hours=tz_offset_h)
-    return out[["station_id", "lat", "lon", "time_utc", "no2"]].sort_values(["station_id", "time_utc"]).reset_index(drop=True)
+    return out[["station_id", "lat", "lon", "time_utc", pollutant]].sort_values(["station_id", "time_utc"]).reset_index(drop=True)
 
 
 def fetch_hourly_met(bbox, start: str, end: str, cache_dir: str | Path = "cache/hindcast") -> pd.DataFrame:
@@ -109,13 +125,14 @@ def main(argv=None) -> int:
     p.add_argument("--start", default="2021-11-01")
     p.add_argument("--end", default="2022-02-28")
     p.add_argument("--city", default="mumbai", choices=sorted(CITY_BBOX))
+    p.add_argument("--pollutant", default="no2", choices=["no2", "pm25", "pm10", "so2", "co", "o3"])
     p.add_argument("--cache-dir", default=None, help="default: cache/hindcast/<city>")
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
     bbox, cache = CITY_BBOX[args.city], args.cache_dir or f"cache/hindcast/{args.city}"
     met = fetch_hourly_met(bbox, args.start, args.end, cache)
     log.info("met: %d hours, blh available for %d", len(met), met.blh.notna().sum())
-    st = fetch_station_hours(bbox, args.start, args.end, cache)
+    st = fetch_station_hours(bbox, args.start, args.end, cache, pollutant=args.pollutant)
     log.info("stations: %d hourly rows, %d stations", len(st), st.station_id.nunique())
     return 0
 
