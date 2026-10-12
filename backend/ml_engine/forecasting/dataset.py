@@ -457,3 +457,247 @@ def build_synthetic_dataset(
     n_train = num_samples - n_val
     return full_ds.split(n_train, n_val)
 
+
+# ---------------------------------------------------------------------------
+# Fitted channel statistics (replaces hardcoded _CHANNEL_STATS)
+# ---------------------------------------------------------------------------
+
+def compute_channel_stats(
+    dataset: "ForecastDataset",
+    channel_names: list[str] | None = None,
+    save_path: "Path | str | None" = None,
+) -> dict[str, tuple[float, float]]:
+    """Compute per-channel (mean, std) from an actual ForecastDataset.
+
+    The global ``_CHANNEL_STATS`` dict contains approximate values that were
+    hand-tuned.  This function computes the real statistics from the provided
+    dataset, enabling accurate normalisation and preventing distribution shift
+    between training and inference.
+
+    Parameters
+    ----------
+    dataset      : ForecastDataset with dynamic array (N, T, C, H, W).
+    channel_names: Optional list of names matching C dimension.  Defaults to
+                   ``DYNAMIC_CHANNELS``.
+    save_path    : If provided, writes JSON to this path for reuse at inference
+                   time.
+
+    Returns
+    -------
+    dict mapping channel name → (mean, std).
+
+    Notes
+    -----
+    * Statistics are computed over all (N, T, H, W) values for each channel C.
+    * NaN values are excluded.
+    * Only dynamic channels are computed; static channels should be computed
+      separately from the static array.
+    """
+    names = channel_names or DYNAMIC_CHANNELS
+    dynamic = dataset.dynamic  # (N, T, C, H, W)
+    n, t, c, h, w = dynamic.shape
+    if c != len(names):
+        raise ValueError(
+            f"Channel count mismatch: dataset has {c} dynamic channels, "
+            f"but {len(names)} names provided."
+        )
+
+    stats: dict[str, tuple[float, float]] = {}
+    for ch_idx, name in enumerate(names):
+        vals = dynamic[:, :, ch_idx, :, :].ravel()
+        valid = vals[np.isfinite(vals)]
+        if len(valid) == 0:
+            log.warning("Channel '%s' has no finite values; keeping default stats.", name)
+            m, s = _CHANNEL_STATS.get(name, (0.0, 1.0))
+        else:
+            m = float(np.mean(valid))
+            s = float(np.std(valid))
+            if s < 1e-8:
+                log.warning("Channel '%s' has near-zero std (%.2e); clamping to 1e-8.", name, s)
+                s = 1e-8
+        stats[name] = (m, s)
+        log.info("Channel %-15s : mean=%.4f  std=%.4f  N=%d", name, m, s, len(valid))
+
+    if save_path is not None:
+        import json
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        serialised = {k: list(v) for k, v in stats.items()}
+        save_path.write_text(json.dumps(serialised, indent=2))
+        log.info("Channel stats saved to %s", save_path)
+
+    return stats
+
+
+def load_channel_stats(path: "Path | str") -> dict[str, tuple[float, float]]:
+    """Load channel stats previously saved by compute_channel_stats().
+
+    Falls back to the hardcoded ``_CHANNEL_STATS`` for any missing key.
+    """
+    import json
+    data = json.loads(Path(path).read_text())
+    stats: dict[str, tuple[float, float]] = {}
+    for name, (m, s) in data.items():
+        stats[name] = (float(m), float(s))
+    # Merge with defaults for any missing channels
+    for name, default in _CHANNEL_STATS.items():
+        if name not in stats:
+            log.warning("Channel '%s' missing from stats file; using default.", name)
+            stats[name] = default
+    return stats
+
+
+# ---------------------------------------------------------------------------
+# Satellite revisit sequence builder
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass, field as dc_field
+import datetime
+
+
+@dataclass
+class RevisitFrame:
+    """One frame in a revisit-aware sequence.
+
+    Attributes
+    ----------
+    timestamp      : UTC timestamp of the frame.
+    data           : xr.Dataset or None if the frame is gap-filled / synthetic.
+    is_real        : True iff this frame comes from an actual satellite overpass.
+    gap_filled     : True iff the frame was interpolated from neighbouring
+                     observations (implies is_real=False).
+    minutes_since_last_real : minutes elapsed since the previous real overpass.
+    cloud_fraction : fraction of cloud-masked pixels [0, 1] for real frames.
+    """
+    timestamp: datetime.datetime
+    data: Any                        # xr.Dataset | None
+    is_real: bool
+    gap_filled: bool = False
+    minutes_since_last_real: float = 0.0
+    cloud_fraction: float = 0.0
+
+
+@dataclass
+class RevisitSequenceInfo:
+    """Summary of how many frames in a sequence are real vs. gap-filled.
+
+    This must be attached to every training sample so that:
+    * The loss can down-weight gap-filled frames.
+    * Evaluation can be stratified by data quality.
+    * Claims about accuracy are restricted to periods with real observations.
+    """
+    frames: list[RevisitFrame]
+    n_real: int = 0
+    n_gap_filled: int = 0
+    mean_gap_minutes: float = 0.0
+    max_gap_minutes: float = 0.0
+
+    def __post_init__(self):
+        self.n_real = sum(1 for f in self.frames if f.is_real)
+        self.n_gap_filled = sum(1 for f in self.frames if f.gap_filled)
+        gaps = [f.minutes_since_last_real for f in self.frames
+                if f.minutes_since_last_real > 0]
+        self.mean_gap_minutes = float(np.mean(gaps)) if gaps else 0.0
+        self.max_gap_minutes  = float(max(gaps))     if gaps else 0.0
+
+    def real_frame_mask(self) -> np.ndarray:
+        """Boolean array (len=n_frames) where True = real satellite overpass."""
+        return np.array([f.is_real for f in self.frames])
+
+
+def build_revisit_sequence(
+    available_timestamps: list[datetime.datetime],
+    available_data: list[Any],           # list of xr.Dataset matching timestamps
+    cloud_fractions: list[float],
+    target_timestamps: list[datetime.datetime],
+    max_gap_hours: float = 48.0,
+    interpolate: bool = True,
+) -> RevisitSequenceInfo:
+    """Build a revisit-annotated sequence for the target time steps.
+
+    Sentinel-5P has a daily revisit cadence (not 30-minute).  This function
+    maps target timestamps onto the nearest available real observations and
+    marks frames that required linear temporal interpolation as gap-filled.
+
+    Parameters
+    ----------
+    available_timestamps : sorted list of timestamps with real satellite data.
+    available_data       : corresponding xr.Dataset list (same length).
+    cloud_fractions      : cloud fraction per real overpass [0, 1].
+    target_timestamps    : the sequence of timestamps we want frames for.
+    max_gap_hours        : maximum gap for linear interpolation; beyond this
+                           the frame is marked as gap-filled with None data.
+    interpolate          : if False, frames without a real overpass within
+                           ±1 h are returned with None data.
+
+    Returns
+    -------
+    RevisitSequenceInfo with one RevisitFrame per target timestamp.
+
+    Notes
+    -----
+    This function does NOT perform spatial interpolation; it only annotates
+    which frames are real.  Actual spatial gap-filling (e.g., kriging or
+    XGBoost-based) must be applied separately.
+    """
+    if len(available_timestamps) != len(available_data):
+        raise ValueError("available_timestamps and available_data must have equal length")
+
+    frames: list[RevisitFrame] = []
+    last_real_time: datetime.datetime | None = None
+
+    for ts in target_timestamps:
+        # Find nearest real overpass
+        min_dt_s = float("inf")
+        nearest_idx = -1
+        for j, at in enumerate(available_timestamps):
+            dt_s = abs((ts - at).total_seconds())
+            if dt_s < min_dt_s:
+                min_dt_s = dt_s
+                nearest_idx = j
+
+        min_dt_min = min_dt_s / 60.0
+        max_gap_min = max_gap_hours * 60.0
+
+        # Minutes since last confirmed real overpass
+        if last_real_time is not None:
+            gap_min = (ts - last_real_time).total_seconds() / 60.0
+        else:
+            gap_min = 0.0
+
+        if nearest_idx >= 0 and min_dt_min <= 60.0:
+            # Within 1 h of a real overpass → treat as real
+            real_ts = available_timestamps[nearest_idx]
+            frames.append(RevisitFrame(
+                timestamp=ts,
+                data=available_data[nearest_idx],
+                is_real=True,
+                gap_filled=False,
+                minutes_since_last_real=float(abs((ts - real_ts).total_seconds() / 60.0)),
+                cloud_fraction=cloud_fractions[nearest_idx],
+            ))
+            last_real_time = ts
+        elif interpolate and min_dt_min <= max_gap_min:
+            # Gap-filled: linear interpolation possible but frame is synthetic
+            frames.append(RevisitFrame(
+                timestamp=ts,
+                data=available_data[nearest_idx],  # nearest frame as proxy
+                is_real=False,
+                gap_filled=True,
+                minutes_since_last_real=gap_min,
+                cloud_fraction=0.0,  # no reliable cloud info for interpolated frames
+            ))
+        else:
+            # No data available; mark as missing
+            frames.append(RevisitFrame(
+                timestamp=ts,
+                data=None,
+                is_real=False,
+                gap_filled=False,
+                minutes_since_last_real=gap_min,
+                cloud_fraction=1.0,  # treat as fully missing
+            ))
+
+    return RevisitSequenceInfo(frames=frames)
+
+
