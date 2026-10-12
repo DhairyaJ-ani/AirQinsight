@@ -1,0 +1,67 @@
+{
+  "pollutant": "no2",
+  "model_type": "LightGBM",
+  "features": [
+    "year",
+    "so2",
+    "pm10",
+    "lat",
+    "lon",
+    "state_enc"
+  ],
+  "target": "no2",
+  "target_unit": "\u00b5g/m\u00b3",
+  "naaqs_annual_threshold": 40.0,
+  "training_years": "2015\u20132021",
+  "n_train_samples": 3034,
+  "cross_validation": {
+    "method": "GroupKFold (state groups)",
+    "n_folds": 5,
+    "fold_rmse": [
+      12.056,
+      8.326,
+      23.852,
+      7.849,
+      16.318
+    ],
+    "oof_rmse": 14.909,
+    "oof_mae": 5.564,
+    "oof_r2": 0.398
+  },
+  "independent_test": {
+    "n_samples": 760,
+    "years": "2022\u20132023",
+    "rmse_ugm3": 10.131,
+    "mae_ugm3": 7.425,
+    "r2": 0.159,
+    "baseline_mean_rmse": 13.445,
+    "baseline_mean_mae": 9.648,
+    "naaqs_exceedances_detected": 12
+  },
+  "feature_importance": {
+    "pm10": 162,
+    "so2": 91,
+    "state_enc": 64,
+    "year": 48,
+    "lat": 13,
+    "lon": 12
+  },
+  "lgb_params": {
+    "objective": "regression",
+    "metric": "rmse",
+    "num_leaves": 31,
+    "learning_rate": 0.05,
+    "n_estimators": 500,
+    "feature_fraction": 0.8,
+    "bagging_fraction": 0.8,
+    "bagging_freq": 5,
+    "min_child_samples": 10,
+    "reg_alpha": 0.1,
+    "reg_lambda": 0.1,
+    "n_jobs": -1,
+    "random_state": 42,
+    "verbose": -1
+  },
+  "model_file": "models/no2_lightgbm/no2_model.txt",
+  "state_encoder_file": "models/no2_lightgbm/no2_state_enc.json"
+}

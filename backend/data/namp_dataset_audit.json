@@ -1,0 +1,62 @@
+{
+  "total_rows": 3752,
+  "columns": [
+    "year",
+    "state",
+    "city",
+    "so2",
+    "no2",
+    "pm10",
+    "pm25",
+    "lat",
+    "lon"
+  ],
+  "year_range": [
+    2015,
+    2023
+  ],
+  "pollutants": {
+    "so2": {
+      "non_null_count": 3719,
+      "coverage_pct": 99.12,
+      "min_ugm3": 2.0,
+      "max_ugm3": 330.0,
+      "mean_ugm3": 56.47,
+      "median_ugm3": 55.0,
+      "negative_values_detected": 0
+    },
+    "no2": {
+      "non_null_count": 3724,
+      "coverage_pct": 99.25,
+      "min_ugm3": 1.0,
+      "max_ugm3": 430.0,
+      "mean_ugm3": 13.76,
+      "median_ugm3": 9.5,
+      "negative_values_detected": 0
+    },
+    "pm10": {
+      "non_null_count": 3724,
+      "coverage_pct": 99.25,
+      "min_ugm3": 2.0,
+      "max_ugm3": 874.0,
+      "mean_ugm3": 49.46,
+      "median_ugm3": 22.0,
+      "negative_values_detected": 0
+    },
+    "pm25": {
+      "non_null_count": 2892,
+      "coverage_pct": 77.08,
+      "min_ugm3": 2.0,
+      "max_ugm3": 258.0,
+      "mean_ugm3": 22.75,
+      "median_ugm3": 12.0,
+      "negative_values_detected": 0
+    }
+  },
+  "data_limitations": [
+    "Years 2015-2020 have varying table formats in original CPCB PDFs; years 2021-2023 are verified multi-pollutant integrated tables.",
+    "Sentinel-5P measures total atmospheric column, not direct surface PM2.5/PM10.",
+    "Lat/Lon coverage in NAMP PDF is city-level and relies on geocoding lookups.",
+    "CO and O3 are not measured by manual NAMP network and require CAAQMS continuous stations."
+  ]
+}
