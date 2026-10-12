@@ -337,3 +337,20 @@ def test_explain_ensemble_downscaler_input_validation():
     with pytest.raises(ValueError, match="finite"):
         explain_ensemble_downscaler(ens, np.array([1.0, np.nan, 2.0, 3.0]))
 
+
+def test_service_run_cache_key_isolation():
+    """_run_dir produces distinct cache keys for use_ensemble=False vs True."""
+    import pandas as pd
+    from ml_engine.service import _run_dir
+
+    bbox = (72.8, 18.9, 73.1, 19.2)
+    day = pd.Timestamp("2025-11-05")
+
+    dir_base = _run_dir(bbox, day, source="gee", use_ensemble=False)
+    dir_ens = _run_dir(bbox, day, source="gee", use_ensemble=True)
+
+    assert dir_base.name != dir_ens.name, (
+        f"Cache collision detected: both baseline and ensemble mapped to {dir_base.name}"
+    )
+
+

@@ -89,6 +89,6 @@ During validation, 4 critical defects were identified and resolved:
 
 ## 5. Test Suite Verification
 
-- Focused tests: `backend/tests/test_downscale.py` (15/15 passed).
+- Focused tests: `backend/tests/test_downscale.py` (16/16 passed).
 - Integration tests: `backend/tests/test_ensemble_xai_simulator.py` (9/9 passed).
 - Full backend suite: 89 passed, 0 failed.
