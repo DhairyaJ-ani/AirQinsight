@@ -1,0 +1,9 @@
+file,date,cloud_masked_fraction,mean_no2_umol_m2,valid_pixels
+no2_raw_coarse_2025-11-05.tif,2025-11-05,0.169,133.2,108
+no2_raw_coarse_2025-11-12.tif,2025-11-12,0.085,80.0,119
+no2_raw_coarse_2025-11-19.tif,2025-11-19,0.0,132.8,130
+no2_raw_coarse_2025-11-26.tif,2025-11-26,0.023,160.9,127
+no2_raw_coarse_2025-12-02.tif,2025-12-02,0.346,118.4,85
+no2_raw_coarse_2025-12-10.tif,2025-12-10,0.0,124.4,130
+no2_raw_coarse_2025-12-17.tif,2025-12-17,0.0,158.3,130
+no2_raw_coarse_2025-12-24.tif,2025-12-24,0.0,114.8,130
