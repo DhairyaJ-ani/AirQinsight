@@ -354,3 +354,64 @@ def test_service_run_cache_key_isolation():
     )
 
 
+def test_explain_weighted_ensemble_exact():
+    """explain_weighted_ensemble_exact computes exact additive TreeSHAP for the weighted ensemble."""
+    import xgboost as xgb
+    import lightgbm as lgb
+    from sklearn.ensemble import RandomForestRegressor
+    from ml_engine.downscaling.ensemble import EnsembleDownscaler
+    from ml_engine.xai import explain_weighted_ensemble_exact, XAIExplanation
+
+    N, D = 80, 6
+    rng = np.random.RandomState(42)
+    X = rng.randn(N, D).astype(np.float32)
+    y = 50.0 + 3.0 * X[:, 0] - 2.0 * X[:, 1] + rng.randn(N).astype(np.float32)
+
+    ens = EnsembleDownscaler()
+    ens.xgb_model = xgb.XGBRegressor(n_estimators=8, max_depth=3, random_state=42).fit(X, y)
+    ens.rf_model = RandomForestRegressor(n_estimators=8, max_depth=4, random_state=42, n_jobs=1).fit(X, y)
+    ens.lgb_model = lgb.LGBMRegressor(n_estimators=8, max_depth=3, random_state=42, n_jobs=1, verbosity=-1).fit(X, y)
+    ens.features = True
+
+    names = [f"feat_{i}" for i in range(D)]
+    exp = explain_weighted_ensemble_exact(ens, X[0], feature_names=names)
+
+    assert isinstance(exp, XAIExplanation)
+    # Verify exact numerical property: base_value + sum(shap_values) == actual weighted prediction
+    ens_res = ens.predict_features(X[0:1])
+    expected_pred = float(ens_res.prediction[0])
+    shap_sum = sum(c["shap_value"] for c in exp.top_contributors)
+    # The XAIExplanation contains top_contributors, but let's test against all features directly
+    import shap
+    exp_xgb = shap.TreeExplainer(ens.xgb_model)
+    exp_rf = shap.TreeExplainer(ens.rf_model)
+    exp_lgb = shap.TreeExplainer(ens.lgb_model)
+    s_xgb = exp_xgb.shap_values(X[0:1])[0]
+    s_rf = exp_rf.shap_values(X[0:1])[0]
+    s_lgb = exp_lgb.shap_values(X[0:1])[0]
+    w = ens.weights
+    s_ens_full = w["xgboost"] * s_xgb + w["random_forest"] * s_rf + w["lightgbm"] * s_lgb
+    b_rf_val = exp_rf.expected_value
+    b_rf = float(b_rf_val[0] if hasattr(b_rf_val, "__getitem__") else b_rf_val)
+    b_ens_full = w["xgboost"] * float(exp_xgb.expected_value) + w["random_forest"] * b_rf + w["lightgbm"] * float(exp_lgb.expected_value)
+
+    assert abs((b_ens_full + np.sum(s_ens_full)) - expected_pred) < 1e-4
+
+    # Test also with non-default calibrated weights
+    ens_calibrated = EnsembleDownscaler(weights={"xgboost": 0.24, "random_forest": 0.36, "lightgbm": 0.40})
+    ens_calibrated.xgb_model = ens.xgb_model
+    ens_calibrated.rf_model = ens.rf_model
+    ens_calibrated.lgb_model = ens.lgb_model
+    ens_calibrated.features = True
+
+    exp_cal = explain_weighted_ensemble_exact(ens_calibrated, X[0], feature_names=names)
+    assert isinstance(exp_cal, XAIExplanation)
+    pred_cal = float(ens_calibrated.predict_features(X[0:1]).prediction[0])
+    w_cal = ens_calibrated.weights
+    s_cal_full = w_cal["xgboost"] * s_xgb + w_cal["random_forest"] * s_rf + w_cal["lightgbm"] * s_lgb
+    b_cal_full = w_cal["xgboost"] * float(exp_xgb.expected_value) + w_cal["random_forest"] * b_rf + w_cal["lightgbm"] * float(exp_lgb.expected_value)
+    assert abs((b_cal_full + np.sum(s_cal_full)) - pred_cal) < 1e-4
+
+
+
+

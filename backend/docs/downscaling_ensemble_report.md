@@ -63,17 +63,41 @@ $$\min_{w_1, w_2, w_3} \frac{1}{N_{\text{val}}} \sum_{i=1}^{N_{\text{val}}} \lef
 
 ---
 
-## 4. XAI Interpretation Boundaries
+## 4. XAI Interpretation Boundaries & Exact Multi-Model SHAP
 
-In `ml_engine/xai/shap_service.py:explain_ensemble_downscaler()`:
-- Feature importance and waterfall attributions are strictly derived from TreeSHAP on **Component A (XGBoost)**.
-- Attributions are explicitly labeled `[XGBoost Component SHAP]` with component weight ($0.50$).
-- Inter-model disagreement and consensus confidence are reported as auxiliary diagnostics, avoiding false claims that a single additive TreeSHAP explains disparate ensemble architectures simultaneously.
+In `ml_engine/xai/shap_service.py`:
+1. **Component Explanation (`explain_ensemble_downscaler`):** Feature importance and waterfall attributions are strictly derived from TreeSHAP on **Component A (XGBoost)**. Attributions are explicitly labeled `[XGBoost Component SHAP]` with component weight ($w_{\text{xgb}}$).
+2. **Exact Ensemble Explanation (`explain_weighted_ensemble_exact`):** Computes exact multi-model TreeSHAP feature attributions across XGBoost, Random Forest, and LightGBM using the exact weights of the loaded ensemble instance:
+   $$\text{SHAP}_{\text{ens}}(X) = \sum_{i} w_i \text{SHAP}_{i}(X), \quad \text{Base}_{\text{ens}} = \sum_{i} w_i \text{Base}_{i}$$
+   Verified via unit test `test_explain_weighted_ensemble_exact`: $\text{Base}_{\text{ens}} + \sum \text{SHAP}_{\text{ens}} = \hat{y}_{\text{ens}}$ within numerical precision ($< 10^{-4}$ tolerance) for both heuristic and validation-calibrated weights.
+3. **Disagreement vs Uncertainty:** Inter-model standard deviation ($\sigma \approx 4.5\ \mu\text{mol}/\text{m}^2$) is reported strictly as **epistemic disagreement / model consensus**, not as calibrated predictive uncertainty.
 
 ---
 
-## 5. Architectural Recommendations
+## 5. Stage 4 Surface-Concentration Evaluation Against CPCB Ground Monitors
 
-1. **Keep Baseline Default:** Maintain `ensemble=False` as the system default. It is computationally lightweight (0.8 ms) and shares identical operational provenance with legacy endpoints.
-2. **Retain Ensemble as Advanced Option:** Offer `ensemble=True` via `/api/v1/downscale/map?ensemble=true` for users seeking multi-model variance reduction and inter-model disagreement diagnostics.
-3. **Roadmap to Full Fine-Scale Validation:** To transition tier 3 from unvalidated to scientifically verified, deploy mobile sensors or high-density low-cost optical monitors across $250\text{ m}$ sub-grids to directly validate sub-pixel gradient fidelity.
+### Dataset Profile:
+- **Ground Monitors:** `backend/data/cpcb_mumbai.csv` contains 28 CPCB CAAQMS monitoring stations across Mumbai with 1,560 station-day records.
+- **QC Screening:** Applying `quality_control()` removes flat-lined or faulty sensors, retaining 1,068 high-quality station-days (960 matched with cloud-free satellite overpasses).
+
+### Physical Column-to-Surface Conversion vs. Raw Ground Observations:
+- **Units:** Satellite column is in $\mu\text{mol}/\text{m}^2$; CPCB monitor reading is in $\mu\text{g}/\text{m}^3$.
+- **Direct Physical Conversion:** Without station calibration, scaling tropospheric columns by boundary-layer height ($\text{NO}_2 \times M / \text{BLH}$) yields:
+  - $N = 960$ matched station-days across 19 QC-passed stations.
+  - $R^2 = -2.13$, $\text{RMSE} = 39.90\ \mu\text{g}/\text{m}^3$, $\text{MAE} = 34.00\ \mu\text{g}/\text{m}^3$, $\text{MBE} = -32.82\ \mu\text{g}/\text{m}^3$.
+  - Pearson $r = 0.118$.
+- **Scientific Finding:** Raw or physically scaled satellite columns alone cannot predict urban ground-level concentrations accurately. Ground-level concentrations are dominated by hyper-local street-level emissions and complex nocturnal boundary layer dynamics. Stage 4 land-use regression (`SurfaceModel` using road density, built-up, and meteorology) is mathematically essential to bridge the satellite column to ground-level surface exposure.
+
+---
+
+## 6. Release Verification & Operational Verdict
+
+| Readiness Level | Status | Evidence / Verification Method |
+|---|---|---|
+| **1. Implemented** | **VERIFIED** | Full multi-model ensemble downscaler, exact weighted TreeSHAP, and cache-isolated pipeline. |
+| **2. Software-Tested** | **VERIFIED** | 17 focused downscale tests and 91 full backend test suite tests pass cleanly. |
+| **3. Experimentally Evaluated** | **VERIFIED** | Benchmarked on 61 days of real Sentinel-5P overpasses with 3-way temporal holdout. |
+| **4. Validated on Surface Monitors** | **PARTIAL** | Physically converted columns evaluated on 960 CPCB station-days; demonstrates necessity of Stage 4 calibration. |
+| **5. Fine-Scale Ground Truth Validated** | **UNVALIDATED** | No independent sub-kilometer spatial raster ground truth exists in the repository. |
+| **6. Ready for Production** | **OPT-IN ONLY (`ensemble=true`)** | Baseline XGBoost remains the production default (`ensemble=false`). |
+

@@ -260,3 +260,125 @@ def explain_ensemble_downscaler(
         predicted_value=base_explanation.predicted_value,
         confidence=combined_confidence,
     )
+
+
+def explain_weighted_ensemble_exact(
+    ensemble,
+    X_row: np.ndarray,
+    feature_names: "Sequence[str] | None" = None,
+    location_label: str = "Target Location",
+) -> "XAIExplanation":
+    """Compute exact ensemble-level TreeSHAP feature attributions across all fitted components.
+
+    Since TreeSHAP is strictly linear under model addition:
+        SHAP_ensemble(X) = sum_i(w_i * SHAP_model_i(X))
+        Base_ensemble    = sum_i(w_i * Base_model_i)
+
+    This yields a mathematically exact attribution breakdown corresponding directly to
+    the weighted ensemble prediction.
+    """
+    import shap
+
+    if not hasattr(ensemble, "xgb_model") or ensemble.xgb_model is None or ensemble.rf_model is None or ensemble.lgb_model is None:
+        raise RuntimeError("EnsembleDownscaler is not fully fitted — call fit() or load() first")
+
+    x_1d = np.asarray(X_row, dtype=np.float32).ravel()
+    if not np.all(np.isfinite(x_1d)):
+        raise ValueError("X_row features must be all finite values (no NaN or Inf)")
+
+    names = feature_names
+    if names is None and hasattr(ensemble, "features") and ensemble.features and ensemble.features is not True:
+        names = ensemble.features.feature_names
+    if names is None:
+        n_feats = x_1d.shape[0]
+        names = [f"feature_{i}" for i in range(n_feats)]
+
+    x_2d = x_1d.reshape(1, -1)
+    weights = ensemble.weights
+
+    # Compute per-model TreeSHAP
+    exp_xgb = shap.TreeExplainer(ensemble.xgb_model)
+    exp_rf = shap.TreeExplainer(ensemble.rf_model)
+    exp_lgb = shap.TreeExplainer(ensemble.lgb_model)
+
+    s_xgb = np.asarray(exp_xgb.shap_values(x_2d)[0], dtype=np.float64)
+    s_rf = np.asarray(exp_rf.shap_values(x_2d)[0], dtype=np.float64)
+    s_lgb = np.asarray(exp_lgb.shap_values(x_2d)[0], dtype=np.float64)
+
+    b_xgb = float(exp_xgb.expected_value)
+    b_rf_val = exp_rf.expected_value
+    b_rf = float(b_rf_val[0] if hasattr(b_rf_val, "__getitem__") else b_rf_val)
+    b_lgb = float(exp_lgb.expected_value)
+
+    # Extract exact weights from loaded ensemble instance
+    if not hasattr(ensemble, "weights") or not ensemble.weights:
+        raise ValueError("EnsembleDownscaler instance missing weights mapping")
+
+    total_w = sum(ensemble.weights.values())
+    if total_w <= 0:
+        raise ValueError(f"Ensemble weights must sum to positive value, got {total_w}")
+
+    w_xgb = float(ensemble.weights["xgboost"]) / total_w
+    w_rf = float(ensemble.weights["random_forest"]) / total_w
+    w_lgb = float(ensemble.weights["lightgbm"]) / total_w
+
+    s_ens = (w_xgb * s_xgb + w_rf * s_rf + w_lgb * s_lgb).astype(np.float32)
+    b_ens = float(w_xgb * b_xgb + w_rf * b_rf + w_lgb * b_lgb)
+
+    ens_res = ensemble.predict_features(x_2d)
+    pred_val = float(ens_res.prediction[0] if hasattr(ens_res.prediction, "__getitem__") else ens_res.prediction)
+    model_disagree = float(ens_res.disagreement)
+    model_agree_conf = float(ens_res.confidence)
+
+    contributions = compute_relative_contributions(
+        shap_values=s_ens,
+        feature_names=list(names),
+        feature_values=x_1d,
+    )
+    exec_summary = generate_executive_explanation(contributions, top_n=3)
+    narrative = generate_detailed_narrative(contributions, pred_val, b_ens)
+
+    waterfall_url = generate_waterfall_chart_base64(
+        base_value=b_ens,
+        shap_values=s_ens,
+        feature_names=list(names),
+        feature_values=x_1d,
+        title=f"Ensemble SHAP Decision Flow · {location_label}",
+    )
+    bar_url = generate_bar_chart_base64(
+        contributions=contributions,
+        title=f"Ensemble Attribution Breakdown (%) · {location_label}",
+    )
+    beeswarm_url = generate_beeswarm_chart_base64(
+        feature_names=list(names),
+        shap_values=s_ens,
+        feature_values=x_1d,
+        title=f"Ensemble Beeswarm Distribution · {location_label}",
+    )
+
+    pos_contribs = [c for c in contributions if c.get("direction") == "increases_no2"]
+    neg_contribs = [c for c in contributions if c.get("direction") == "reduces_no2"]
+
+    return XAIExplanation(
+        executive_summary=(
+            f"[Ensemble Multi-Model SHAP] {exec_summary} "
+            f"[Fused prediction={pred_val:.2f} µmol m⁻² · "
+            f"Inter-model disagreement: {model_disagree:.3f} µmol m⁻² · "
+            f"Consensus confidence: {model_agree_conf:.2f}]"
+        ),
+        detailed_narrative=(
+            f"Feature attributions are derived from exact weighted linear combination of TreeSHAP "
+            f"across XGBoost ({w_xgb:.2f}), Random Forest ({w_rf:.2f}), and LightGBM ({w_lgb:.2f}). "
+            f"{narrative}"
+        ),
+        top_contributors=contributions[:6],
+        positive_contributors=pos_contribs[:5],
+        negative_contributors=neg_contribs[:5],
+        waterfall_chart_url=waterfall_url,
+        beeswarm_chart_url=beeswarm_url,
+        bar_chart_url=bar_url,
+        base_value=round(b_ens, 2),
+        predicted_value=round(pred_val, 2),
+        confidence=model_agree_conf,
+    )
+
