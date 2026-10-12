@@ -202,35 +202,69 @@ class MaskAwareForecastLoss:
         self.min_valid_frac = min_valid_frac
 
     def _masked_mse(self, pred, target, mask):
-        """MSE computed only over valid pixels."""
-        diff = (pred - target) ** 2
-        valid = mask.float()
-        total_valid = valid.sum()
-        if float(total_valid.item()) / float(valid.numel()) < self.min_valid_frac:
-            # Not enough valid pixels; fall back to unmasked MSE
-            return diff.mean()
-        return (diff * valid).sum() / (total_valid + 1e-8)
+        """MSE computed only over valid, finite pixels."""
+        import torch
+        # Clean target and pred NaNs/Infs under mask
+        valid = (mask.float() > 0.5) & torch.isfinite(target) & torch.isfinite(pred)
+        total_valid = valid.float().sum()
+        if total_valid < 1.0 or (float(total_valid.item()) / float(valid.numel()) < self.min_valid_frac):
+            # Not enough valid pixels or completely invalid mask:
+            # Return safe zero loss tied to pred graph so autograd doesn't break
+            return (pred * 0.0).sum()
+        
+        # Zero out invalid entries before squaring to avoid propagating NaNs
+        clean_target = torch.where(valid, target, torch.zeros_like(target))
+        clean_pred = torch.where(valid, pred, torch.zeros_like(pred))
+        diff = (clean_pred - clean_target) ** 2
+        return (diff * valid.float()).sum() / (total_valid + 1e-8)
 
     def _masked_gradient_loss(self, pred, target, mask):
         """Gradient loss restricted to valid pixels."""
         import torch
         import torch.nn.functional as F
-        p_gx, p_gy = _spatial_gradients(pred)
-        t_gx, t_gy = _spatial_gradients(target)
+
+        # Sanitize target and pred with zero-replacement for gradient computation
+        finite_mask = mask & torch.isfinite(target) & torch.isfinite(pred)
+        clean_target = torch.where(finite_mask, target, torch.zeros_like(target))
+        clean_pred = torch.where(finite_mask, pred, torch.zeros_like(pred))
+
+        p_gx, p_gy = _spatial_gradients(clean_pred)
+        t_gx, t_gy = _spatial_gradients(clean_target)
+
         # The gradient at a pixel is valid only when that pixel and its
-        # neighbours are valid.  Approximate by dilating the mask inward
-        # with a 3x3 max-pool of the inverted mask (any masked neighbour
-        # invalidates the gradient).
+        # neighbours are valid. Approximate by dilating the mask inward
+        # with a 3x3 max-pool of the inverted mask.
         B, C, H, W = mask.shape
-        m_flat = mask.float().reshape(B * C, 1, H, W)
+        m_flat = finite_mask.float().reshape(B * C, 1, H, W)
         invalid_g = F.max_pool2d(1.0 - m_flat, 3, stride=1, padding=1)
         valid_g = (1.0 - invalid_g).reshape(B, C, H, W)
         n_valid = valid_g.sum()
         if float(n_valid.item()) < 1.0:
-            return torch.tensor(0.0, device=pred.device)
+            return (pred * 0.0).sum()
         loss_x = ((p_gx - t_gx) ** 2 * valid_g).sum() / (n_valid + 1e-8)
         loss_y = ((p_gy - t_gy) ** 2 * valid_g).sum() / (n_valid + 1e-8)
         return 0.5 * (loss_x + loss_y)
+
+    def _masked_mass_loss(self, pred, target, mask):
+        """Mass conservation loss over valid pixels."""
+        import torch
+        finite_mask = mask & torch.isfinite(target) & torch.isfinite(pred)
+        n_valid = finite_mask.float().sum(dim=(-1, -2))
+        clean_target = torch.where(finite_mask, target, torch.zeros_like(target))
+        clean_pred = torch.where(finite_mask, pred, torch.zeros_like(pred))
+
+        m_pred = (clean_pred * finite_mask.float()).sum(dim=(-1, -2))
+        m_true = (clean_target * finite_mask.float()).sum(dim=(-1, -2))
+
+        # Only compute mass loss where at least one valid pixel exists
+        has_pixels = (n_valid > 0.0)
+        if not has_pixels.any():
+            return (pred * 0.0).sum()
+
+        eps = 1.0
+        rel_diff = ((m_pred - m_true) ** 2) / ((m_true + eps) ** 2)
+        masked_rel_diff = torch.where(has_pixels, rel_diff, torch.zeros_like(rel_diff))
+        return masked_rel_diff.sum() / (has_pixels.float().sum() + 1e-8)
 
     def __call__(self, pred, target, valid_mask=None) -> dict:
         """Compute masked losses.
@@ -240,7 +274,7 @@ class MaskAwareForecastLoss:
         pred       : (B, horizons, H, W)
         target     : (B, horizons, H, W)
         valid_mask : (B, horizons, H, W) bool tensor, True = valid/observed pixel.
-                     If None, falls back to standard unmasked loss.
+                     If None, defaults to finite target pixels.
 
         Returns
         -------
@@ -248,13 +282,16 @@ class MaskAwareForecastLoss:
         """
         import torch
         if valid_mask is None:
-            valid_mask = torch.ones_like(pred, dtype=torch.bool)
+            valid_mask = torch.isfinite(target)
+        else:
+            valid_mask = valid_mask & torch.isfinite(target)
+
         mask = valid_mask.to(pred.device)
         valid_frac = float(mask.float().mean().item())
 
         l_mse  = self._masked_mse(pred, target, mask)
         l_grad = self._masked_gradient_loss(pred, target, mask)
-        l_mass = mass_conservation_loss(pred, target)  # mass uses all pixels
+        l_mass = self._masked_mass_loss(pred, target, mask)
         total  = self.w_mse * l_mse + self.w_grad * l_grad + self.w_mass * l_mass
         return {
             "total":          total,
@@ -263,6 +300,7 @@ class MaskAwareForecastLoss:
             "mass":           l_mass.detach(),
             "valid_fraction": valid_frac,
         }
+
 
     def numpy_eval(
         self,

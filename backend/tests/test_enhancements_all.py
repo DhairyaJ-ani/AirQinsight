@@ -158,3 +158,67 @@ def test_report_evidence_validation():
     is_valid, errors = validate_evidence(evidence_bad)
     assert not is_valid
     assert any("0 reported validation samples" in e for e in errors)
+
+
+def test_mask_aware_forecast_loss_edge_cases():
+    """Verify MaskAwareForecastLoss gracefully handles all-invalid masks, NaNs, and autograd."""
+    loss_fn = MaskAwareForecastLoss()
+    pred = torch.randn((2, 4, 16, 16), requires_grad=True)
+
+    # 1. Target contains NaNs and Infs, mask is all False (all-invalid)
+    target_nan = torch.full((2, 4, 16, 16), float("nan"))
+    all_invalid_mask = torch.zeros((2, 4, 16, 16), dtype=torch.bool)
+
+    losses = loss_fn(pred, target_nan, valid_mask=all_invalid_mask)
+    assert not torch.isnan(losses["total"])
+    assert not torch.isinf(losses["total"])
+    assert losses["total"].item() == pytest.approx(0.0)
+
+    # Verify gradients can backprop without generating NaN or breaking the graph
+    losses["total"].backward()
+    assert pred.grad is not None
+    assert not torch.isnan(pred.grad).any()
+
+    # 2. Target has isolated finite islands surrounded by NaNs
+    pred.grad.zero_()
+    target_mixed = torch.full((2, 4, 16, 16), float("nan"))
+    target_mixed[:, :, 4:12, 4:12] = 25.0
+    partial_mask = torch.isfinite(target_mixed)
+
+    losses_mixed = loss_fn(pred, target_mixed, valid_mask=partial_mask)
+    assert not torch.isnan(losses_mixed["total"])
+    assert losses_mixed["total"].item() > 0.0
+
+    losses_mixed["total"].backward()
+    assert not torch.isnan(pred.grad).any()
+
+
+def test_calibrate_ensemble_weights_degenerate_cases():
+    """Verify calibrate_ensemble_weights_on_val handles zero variance, NaNs, and empty inputs."""
+    # 1. Constant target (zero variance)
+    y_const = np.full(50, 42.0)
+    preds = {
+        "xgboost": np.full(50, 42.0),
+        "random_forest": np.full(50, 40.0),
+        "lightgbm": np.full(50, 44.0),
+    }
+    weights = calibrate_ensemble_weights_on_val(y_const, preds, metric="r2")
+    assert pytest.approx(sum(weights.values()), 0.01) == 1.0
+    assert weights["xgboost"] >= weights["random_forest"]
+
+    # 2. Inputs containing NaNs
+    y_nan = np.array([float("nan"), 10.0, 20.0, 30.0, float("nan")])
+    preds_nan = {
+        "xgboost": np.array([5.0, 10.0, 20.0, 30.0, 40.0]),
+        "random_forest": np.array([5.0, 11.0, 19.0, 31.0, 40.0]),
+        "lightgbm": np.array([5.0, 12.0, 18.0, 29.0, 40.0]),
+    }
+    weights_nan = calibrate_ensemble_weights_on_val(y_nan, preds_nan, metric="rmse")
+    assert pytest.approx(sum(weights_nan.values()), 0.01) == 1.0
+
+    # 3. All invalid inputs (returns equal weights safely)
+    y_all_nan = np.full(5, float("nan"))
+    weights_fallback = calibrate_ensemble_weights_on_val(y_all_nan, preds_nan)
+    assert pytest.approx(sum(weights_fallback.values()), 0.01) == 1.0
+
+

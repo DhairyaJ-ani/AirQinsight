@@ -494,38 +494,64 @@ def calibrate_ensemble_weights_on_val(
     """
     y_true = np.asarray(y_true_val, dtype=np.float64).ravel()
     models = list(preds_val.keys())
+    if not models:
+        raise ValueError("preds_val must contain at least one model prediction")
+
     pred_matrix = np.column_stack([np.asarray(preds_val[m], dtype=np.float64).ravel() for m in models])
+    if len(y_true) != len(pred_matrix):
+        raise ValueError(f"Length mismatch: y_true_val has {len(y_true)} elements, but predictions have {len(pred_matrix)} rows.")
+
+    # Filter out any non-finite values across y_true or preds
+    valid = np.isfinite(y_true) & np.all(np.isfinite(pred_matrix), axis=1)
+
+    if not np.any(valid):
+        # Degenerate case: no valid observations; return equal default weights
+        eq_w = round(1.0 / len(models), 3)
+        return {m: eq_w for m in models}
+
+    y_true = y_true[valid]
+    pred_matrix = pred_matrix[valid]
 
     best_score = -float("inf") if metric == "r2" else float("inf")
-    best_weights = {m: 1.0 / len(models) for m in models}
+    best_weights = {m: round(1.0 / len(models), 3) for m in models}
 
-    # Generate simplex grid for 3 models: w0 + w1 + w2 = 1.0
-    steps = int(round(1.0 / step))
-    ss_tot = float(np.sum((y_true - np.mean(y_true)) ** 2)) + 1e-12
+    # Variance of ground truth; if zero (constant target), R² is degenerate; fallback to RMSE
+    ss_tot = float(np.sum((y_true - np.mean(y_true)) ** 2))
+    if ss_tot < 1e-12:
+        metric = "rmse"
 
-    for i in range(steps + 1):
-        for j in range(steps + 1 - i):
-            k = steps - i - j
-            w0, w1, w2 = i * step, j * step, k * step
-            w_vec = np.array([w0, w1, w2], dtype=np.float64)
-            # If models has different length or names, handle standard 3 models:
-            if len(models) == 3:
+    # Generate simplex grid for models: weights sum to 1.0, w_i >= 0
+    steps = max(1, int(round(1.0 / step)))
+
+    if len(models) == 3:
+        for i in range(steps + 1):
+            for j in range(steps + 1 - i):
+                k = steps - i - j
+                w0, w1, w2 = i * step, j * step, k * step
+                w_vec = np.array([w0, w1, w2], dtype=np.float64)
                 fused = pred_matrix @ w_vec
-            else:
-                fused = pred_matrix.mean(axis=1)
+                err = fused - y_true
+                if metric == "r2":
+                    ss_res = float(np.sum(err ** 2))
+                    score = 1.0 - (ss_res / ss_tot)
+                    if score > best_score:
+                        best_score = score
+                        best_weights = {models[0]: round(w0, 3), models[1]: round(w1, 3), models[2]: round(w2, 3)}
+                else:
+                    rmse = float(np.sqrt(np.mean(err ** 2)))
+                    if rmse < best_score:
+                        best_score = rmse
+                        best_weights = {models[0]: round(w0, 3), models[1]: round(w1, 3), models[2]: round(w2, 3)}
+    else:
+        # For arbitrary model counts, normalize equal weighting
+        best_weights = {m: round(1.0 / len(models), 3) for m in models}
 
-            err = fused - y_true
-            if metric == "r2":
-                ss_res = float(np.sum(err ** 2))
-                score = 1.0 - (ss_res / ss_tot)
-                if score > best_score:
-                    best_score = score
-                    best_weights = {models[0]: round(w0, 3), models[1]: round(w1, 3), models[2]: round(w2, 3)}
-            else:
-                rmse = float(np.sqrt(np.mean(err ** 2)))
-                if rmse < best_score:
-                    best_score = rmse
-                    best_weights = {models[0]: round(w0, 3), models[1]: round(w1, 3), models[2]: round(w2, 3)}
+    # Guarantee weights sum exactly to 1.0
+    s = sum(best_weights.values())
+    if s > 0:
+        first_m = models[0]
+        best_weights[first_m] = round(best_weights[first_m] + (1.0 - s), 3)
 
     return best_weights
+
 
