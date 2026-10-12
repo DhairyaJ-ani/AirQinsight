@@ -53,6 +53,56 @@ class PhysicsConfig:
     # Source persistence with categorization (power plants, industrial, traffic)
     enable_source_persistence: bool = True
 
+    # --- Pollutant-specific physics (defaults reproduce the NO₂ reference) ---
+    # Registry key from pollutant_config.POLLUTANTS; names the output variable.
+    pollutant: str = "no2"
+
+    # Concentration unit written to output attrs.
+    units: str = "ug m-3"
+
+    # Dry-deposition velocity (m/s). None/0 = no deposition sink.
+    deposition_velocity_ms: float | None = None
+
+    # Mixing-layer depth (m) used to turn deposition velocity into a loss
+    # rate v_d / H. A per-call ERA5 boundary-layer height overrides this.
+    mixing_height_m: float = 500.0
+
+    # Interpolation order for advecting the concentration field: 1 = bilinear
+    # (original NO₂ behaviour, adds ~15-25 m²/s of numerical diffusion along the
+    # wind at 250 m cells), 3 = cubic (matches the analytic Gaussian-puff spread).
+    advection_order: int = 1
+
+    # "rescale": after each export frame, rescale the field so its total equals
+    #            the initial total (original NO₂ behaviour).
+    # "none":    leave the budget alone, so decay, deposition and outflow show
+    #            up in mass_error instead of being hidden by rescaling.
+    mass_policy: str = "rescale"
+
+    @classmethod
+    def for_pollutant(cls, key: str, **overrides) -> "PhysicsConfig":
+        """Build a config from the pollutant registry.
+
+        NO₂ keeps the original behaviour. Every other pollutant takes its
+        diffusivity, chemical lifetime and deposition velocity from
+        ``pollutant_config`` and stops rescaling the mass budget, because
+        rescaling would cancel the loss terms, and use cubic advection. A
+        lifetime of ``None`` means chemically conservative on forecast timescales.
+        """
+        from ..pollutant_config import get_pollutant
+
+        p = get_pollutant(key)
+        kwargs = dict(
+            pollutant=p.key,
+            units={"µg/m³": "ug m-3", "mg/m³": "mg m-3"}.get(p.unit, p.unit),
+            diffusivity_m2_s=p.diffusivity_m2_s,
+            lifetime_h=p.chemical_lifetime_h if p.chemical_lifetime_h else float("inf"),
+            deposition_velocity_ms=p.deposition_velocity_ms,
+            mass_policy="rescale" if p.key == "no2" else "none",
+            advection_order=1 if p.key == "no2" else 3,
+        )
+        kwargs.update(overrides)
+        return cls(**kwargs)
+
     @property
     def horizon_steps(self) -> list[int]:
         """Export times in minutes: [30, 60, 90, 120, ...]."""
@@ -300,6 +350,11 @@ class ForecastConfig:
 
     # If True, log detailed step-by-step timing.
     verbose: bool = False
+
+    @classmethod
+    def for_pollutant(cls, key: str, **physics_overrides) -> "ForecastConfig":
+        """Forecast config whose physics solver uses ``key``'s own parameters."""
+        return cls(physics=PhysicsConfig.for_pollutant(key, **physics_overrides))
 
     @classmethod
     def physics_only(cls) -> "ForecastConfig":

@@ -15,11 +15,15 @@ The governing PDE is:
 Operator-split per timestep dt:
 1. Advection  – semi-Lagrangian midpoint back-trajectory (unconditionally stable).
 2. Diffusion  – explicit 5-point Laplacian sub-stepped so that dt ≤ dx²/(4K).
-3. Reaction   – exact exponential decay: C ← C · exp(-dt/τ).
-4. Emission   – persistent source: S = C₀/τ  (maintains hotspot intensities).
+3. Loss       – exact exponential decay: C ← C · exp(-dt·k), with
+                 k = 1/τ_chem + v_d/H  (chemistry + dry deposition over the mixing layer).
+4. Emission   – persistent source: S = C₀·k  (balances loss, maintains hotspot intensities).
+                 For a chemically conservative pollutant with no deposition k = 0, so
+                 "persistent" reduces to a free plume.
 
 Wind is updated from the ERA5 sequence (hourly) interpolated to the internal dt.
-Mass is checked and corrected at each 30-min export frame.
+Mass is checked at each 30-min export frame; it is rescaled to the initial total
+only when ``PhysicsConfig.mass_policy == "rescale"`` (the NO₂ default).
 """
 
 from __future__ import annotations
@@ -41,9 +45,9 @@ log = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _bilinear_interp(arr: np.ndarray, row: np.ndarray, col: np.ndarray) -> np.ndarray:
-    """Map coordinates with bilinear interpolation and nearest-neighbour clamping."""
-    return ndimage.map_coordinates(arr, [row, col], order=1, mode="nearest")
+def _bilinear_interp(arr: np.ndarray, row: np.ndarray, col: np.ndarray, order: int = 1) -> np.ndarray:
+    """Map coordinates (default bilinear) with nearest-neighbour clamping."""
+    return ndimage.map_coordinates(arr, [row, col], order=order, mode="nearest")
 
 
 def _diffuse(c: np.ndarray, dx: float, dy: float, k: float, dt: float) -> np.ndarray:
@@ -72,8 +76,15 @@ def _advect(
     dx: float,
     dy: float,
     dt: float,
+    order: int = 1,
 ) -> np.ndarray:
-    """Semi-Lagrangian midpoint back-trajectory advection."""
+    """Semi-Lagrangian midpoint back-trajectory advection.
+
+    ``order`` is the interpolation order applied to the concentration field
+    (1 = bilinear, 3 = cubic). Bilinear adds numerical diffusion along the wind;
+    cubic does not (see test_physics_pollutants.TestAnalyticPuff). The wind itself
+    is always sampled bilinearly.
+    """
     dep_c = cols - u * dt / dx
     dep_r = rows + v * dt / dy  # row grows southward, +v = northward
     # midpoint refinement
@@ -81,7 +92,7 @@ def _advect(
     v_mid = _bilinear_interp(v, 0.5 * (dep_r + rows), 0.5 * (dep_c + cols))
     dep_c = cols - u_mid * dt / dx
     dep_r = rows + v_mid * dt / dy
-    return _bilinear_interp(c, dep_r, dep_c)
+    return _bilinear_interp(c, dep_r, dep_c, order)
 
 
 def _enforce_mass(c: np.ndarray, total_mass_0: float) -> np.ndarray:
@@ -134,7 +145,7 @@ class ImprovedPhysicsSolver:
         source: np.ndarray,
         decay: float,
     ) -> np.ndarray:
-        c = _advect(c, u, v, self._rows, self._cols, self.dx, self.dy, dt)
+        c = _advect(c, u, v, self._rows, self._cols, self.dx, self.dy, dt, self.cfg.advection_order)
         c = _diffuse(c, self.dx, self.dy, self.cfg.diffusivity_m2_s, dt)
         c = c * decay + source
         return np.clip(c, 0.0, None)
@@ -150,6 +161,7 @@ class ImprovedPhysicsSolver:
         slope: np.ndarray | None = None,
         emission_sources: dict[str, np.ndarray] | None = None,
         preserve_mass: bool = True,
+        mixing_height_m: float | np.ndarray | None = None,
     ) -> Iterator[tuple[int, np.ndarray]]:
         """Yield (horizon_min, concentration_array) for each 30-min frame.
 
@@ -163,7 +175,10 @@ class ImprovedPhysicsSolver:
         slope           : optional terrain slope array (H × W in degrees).
         emission_sources: optional dict with categorized masks/rates:
                           {"power_plants": arr, "industrial": arr, "traffic": arr}.
-        preserve_mass   : enforce mass conservation at each export frame.
+        preserve_mass   : enforce mass conservation at each export frame
+                          (only effective when cfg.mass_policy == "rescale").
+        mixing_height_m : boundary-layer height (m), scalar or (H × W) array, used for
+                          the dry-deposition loss v_d / H. Defaults to cfg.mixing_height_m.
 
         Yields
         ------
@@ -171,8 +186,17 @@ class ImprovedPhysicsSolver:
         """
         cfg = self.cfg
         c0 = np.nan_to_num(c0.astype(np.float64), nan=float(np.nanmean(c0)))
-        tau = cfg.lifetime_h * 3600.0
         dt = cfg.dt_s
+
+        # First-order loss rate (1/s): chemistry + dry deposition. A non-finite or
+        # non-positive lifetime means no chemical loss.
+        k_chem = 1.0 / (cfg.lifetime_h * 3600.0) if math.isfinite(cfg.lifetime_h) and cfg.lifetime_h > 0 else 0.0
+        vd = cfg.deposition_velocity_ms or 0.0
+        if vd > 0:
+            h_mix = cfg.mixing_height_m if mixing_height_m is None else mixing_height_m
+            k_loss = k_chem + vd / np.clip(h_mix, 50.0, None)
+        else:
+            k_loss = k_chem
 
         total_mass_0 = float(np.nansum(c0))
 
@@ -257,13 +281,13 @@ class ImprovedPhysicsSolver:
             step = min(dt, max_s - elapsed, next_export_s - elapsed)
             u, v = _wind_at(elapsed / 60.0)
             # recompute decay & source for partial step
-            d = math.exp(-step / tau)
+            d = np.exp(-k_loss * step)
             src = source_base * (1.0 - d) if (cfg.emission_mode == "persistent" and cfg.enable_source_persistence) else 0.0
             c = self._step(c, u, v, step, src, d)
             elapsed += step
 
             if abs(elapsed - next_export_s) < 1e-3:
-                if preserve_mass and total_mass_0 > 0:
+                if preserve_mass and cfg.mass_policy == "rescale" and total_mass_0 > 0:
                     c = _enforce_mass(c, total_mass_0)
                 horizon_min = round(elapsed / 60.0)
                 yield horizon_min, c.astype(np.float32)
@@ -281,13 +305,15 @@ class ImprovedPhysicsSolver:
         slope: np.ndarray | None = None,
         emission_sources: dict[str, np.ndarray] | None = None,
         preserve_mass: bool = True,
+        mixing_height_m: float | np.ndarray | None = None,
     ) -> xr.Dataset:
         """Run the solver and return a Dataset with all forecast frames.
 
         Returns
         -------
         xr.Dataset with variables:
-          no2_forecast  (horizon_min, y, x) – forecast concentration µg m⁻³
+          <pollutant>_forecast (horizon_min, y, x) – forecast concentration
+                        (``no2_forecast`` for NO₂, ``pm25_forecast`` for PM₂.₅, …)
           mass_error    (horizon_min,)       – relative mass conservation error
         """
         frames = []
@@ -302,6 +328,7 @@ class ImprovedPhysicsSolver:
             slope=slope,
             emission_sources=emission_sources,
             preserve_mass=preserve_mass,
+            mixing_height_m=mixing_height_m,
         ):
             frames.append(c)
             horizons.append(h_min)
@@ -313,12 +340,15 @@ class ImprovedPhysicsSolver:
             np.stack(frames),
             coords={"horizon_min": horizons, "y": y, "x": x},
             dims=("horizon_min", "y", "x"),
-            name="no2_forecast",
+            name=f"{self.cfg.pollutant}_forecast",
             attrs={
-                "units": "ug m-3",
+                "pollutant": self.cfg.pollutant,
+                "units": self.cfg.units,
                 "solver": "improved-semi-Lagrangian-advection-diffusion-decay",
                 "diffusivity_m2_s": self.cfg.diffusivity_m2_s,
-                "lifetime_h": self.cfg.lifetime_h,
+                "lifetime_h": self.cfg.lifetime_h if math.isfinite(self.cfg.lifetime_h) else -1.0,
+                "deposition_velocity_ms": self.cfg.deposition_velocity_ms or 0.0,
+                "mass_policy": self.cfg.mass_policy,
                 "emission_mode": self.cfg.emission_mode,
                 "wind_update_interval_min": self.cfg.wind_update_interval_min,
             },
@@ -329,4 +359,4 @@ class ImprovedPhysicsSolver:
             dims=("horizon_min",),
             name="mass_error",
         )
-        return xr.Dataset({"no2_forecast": da, "mass_error": me})
+        return xr.Dataset({da.name: da, "mass_error": me})

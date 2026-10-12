@@ -155,6 +155,7 @@ def run_inference(
     checkpoint_path: str | Path | None = None,
     preserve_mass: bool = True,
     base_skill: float = 0.63,
+    mixing_height_m: float | np.ndarray | None = None,
 ) -> ForecastResult:
     """Run the full hybrid physics + AI forecasting pipeline.
 
@@ -171,6 +172,8 @@ def run_inference(
     checkpoint_path : path to ConvLSTM checkpoint (.pt file).
     preserve_mass   : enforce mass conservation at each 30-min export.
     base_skill      : baseline temporal correlation for confidence map.
+    mixing_height_m : boundary-layer height (m), scalar or (H, W); sets the
+                      dry-deposition loss v_d / H. None → cfg.physics.mixing_height_m.
 
     Returns
     -------
@@ -211,9 +214,10 @@ def run_inference(
         slope=slope_arr,
         emission_sources=emiss_dict,
         preserve_mass=preserve_mass,
+        mixing_height_m=mixing_height_m,
     )
 
-    physics_frames = physics_ds["no2_forecast"].values   # (horizons, H, W)
+    physics_frames = physics_ds[f"{cfg.physics.pollutant}_forecast"].values   # (horizons, H, W)
     mass_errors    = physics_ds["mass_error"].values.tolist()
     horizons_min   = physics_ds["horizon_min"].values.tolist()
 
@@ -267,6 +271,8 @@ def run_inference(
         x=x,
         meta={
             "physics_emission_mode": cfg.physics.emission_mode,
+            "pollutant": cfg.physics.pollutant,
+            "physics_mass_policy": cfg.physics.mass_policy,
             "use_ai_residual": cfg.use_ai_residual,
             "checkpoint": str(checkpoint_path) if checkpoint_path else None,
         },

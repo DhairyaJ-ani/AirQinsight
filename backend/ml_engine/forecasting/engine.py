@@ -63,6 +63,7 @@ class ForecastEngine:
         static_feat: np.ndarray | None = None,
         preserve_mass: bool = True,
         base_skill: float = 0.63,
+        mixing_height_m: float | np.ndarray | None = None,
     ) -> ForecastResult:
         """Run the forecasting pipeline and return a ForecastResult.
 
@@ -77,6 +78,8 @@ class ForecastEngine:
         static_feat     : (static_channels, H, W) for AI correction.
         preserve_mass   : enforce mass conservation at each 30-min frame.
         base_skill      : temporal correlation used to scale confidence maps.
+        mixing_height_m : boundary-layer height (m), scalar or (H, W), for
+                          pollutant dry deposition. None → config default.
 
         Returns
         -------
@@ -96,6 +99,7 @@ class ForecastEngine:
             checkpoint_path=self.checkpoint_path,
             preserve_mass=preserve_mass,
             base_skill=base_skill,
+            mixing_height_m=mixing_height_m,
         )
 
         log.info(
