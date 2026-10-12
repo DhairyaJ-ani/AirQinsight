@@ -1,0 +1,83 @@
+{
+  "feature_names": [
+    "elevation",
+    "slope",
+    "ndvi",
+    "built_up",
+    "road_density",
+    "night_lights",
+    "ghsl_built",
+    "population",
+    "power_plants",
+    "u10",
+    "v10",
+    "wind_speed",
+    "blh",
+    "sp",
+    "t2m",
+    "no2_ring",
+    "no2_day_mean",
+    "doy_sin",
+    "doy_cos"
+  ],
+  "static_features": [
+    "elevation",
+    "slope",
+    "ndvi",
+    "built_up",
+    "road_density",
+    "night_lights",
+    "ghsl_built",
+    "population",
+    "power_plants"
+  ],
+  "refine_factor": 14,
+  "n_trees": 195,
+  "n_train_samples": 7192,
+  "trained_period": [
+    "2025-11-01",
+    "2025-12-31"
+  ],
+  "temporal_holdout_coarse": {
+    "n": 1555,
+    "r2": 0.9269330777428204,
+    "rmse": 15.53519191883076,
+    "mae": 11.21291475081367,
+    "mbe": 0.15575241260589895,
+    "pearson_r": 0.9628459796348772
+  },
+  "feature_importance": {
+    "no2_ring": 0.6205166578292847,
+    "night_lights": 0.05142078176140785,
+    "ndvi": 0.04685584455728531,
+    "power_plants": 0.041405901312828064,
+    "no2_day_mean": 0.03947294503450394,
+    "population": 0.02558858133852482,
+    "ghsl_built": 0.020624950528144836,
+    "road_density": 0.018002282828092575,
+    "u10": 0.017721448093652725,
+    "doy_sin": 0.01611715741455555,
+    "slope": 0.015392288565635681,
+    "blh": 0.014166982844471931,
+    "built_up": 0.013090175576508045,
+    "elevation": 0.012791252695024014,
+    "v10": 0.01084060501307249,
+    "wind_speed": 0.009454731829464436,
+    "sp": 0.009364769794046879,
+    "doy_cos": 0.008640920743346214,
+    "t2m": 0.008531694300472736
+  },
+  "config": {
+    "n_estimators": 800,
+    "max_depth": 6,
+    "learning_rate": 0.05,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "min_child_weight": 3.0,
+    "early_stopping_rounds": 50,
+    "validation_fraction": 0.2,
+    "backprojection_iterations": 5,
+    "random_state": 42
+  },
+  "target_units": "umol m-2"
+}

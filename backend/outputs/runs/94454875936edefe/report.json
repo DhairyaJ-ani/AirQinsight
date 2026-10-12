@@ -1,0 +1,461 @@
+{
+  "source": "gee",
+  "config": {
+    "bbox": [
+      72.713,
+      18.743,
+      73.013,
+      19.443
+    ],
+    "start_date": "2026-08-24",
+    "end_date": "2026-09-22",
+    "coarse_res_deg": 0.035,
+    "refine_factor": 14,
+    "s5p_product": "NRTI",
+    "qa_threshold": 0.75,
+    "max_cloud_fraction": 0.3,
+    "min_valid_subpixel_fraction": 0.5,
+    "crs": "EPSG:4326",
+    "output_dir": "outputs/runs/94454875936edefe",
+    "model_dir": "outputs/runs/94454875936edefe/models",
+    "cache_dir": "cache",
+    "station_hours": [
+      12,
+      16
+    ],
+    "surface_model_path": "/Users/dhairyapunitjani/Development/Internal Hackathon 2026/InternalHackathon/backend/ml_engine/pretrained/no2_surface_24h.joblib",
+    "fetch_osm_roads": false,
+    "gapfill": {
+      "min_day_coverage": 0.2,
+      "rf_estimators": 200,
+      "rf_max_depth": 18,
+      "rf_min_samples_leaf": 2,
+      "iterations": 3,
+      "mosaic_windows_days": [
+        7,
+        15,
+        31
+      ],
+      "holdout_fraction": 0.1,
+      "random_state": 42
+    },
+    "downscale": {
+      "n_estimators": 800,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "min_child_weight": 3.0,
+      "early_stopping_rounds": 50,
+      "validation_fraction": 0.2,
+      "backprojection_iterations": 5,
+      "random_state": 42
+    },
+    "dispersion": {
+      "horizons_h": [
+        1.0,
+        3.0,
+        6.0
+      ],
+      "diffusivity_m2_s": 50.0,
+      "lifetime_h": 4.0,
+      "dt_s": 300.0,
+      "emission_mode": "persistent"
+    },
+    "validation": {
+      "cv_folds": 5,
+      "future_days_fraction": 0.2,
+      "min_r2": 0.6,
+      "max_rmse_ugm3": 15.0
+    }
+  },
+  "grids": {
+    "coarse": {
+      "west": 72.713,
+      "north": 19.443,
+      "res": 0.035,
+      "width": 9,
+      "height": 20,
+      "crs": "EPSG:4326"
+    },
+    "fine": {
+      "west": 72.713,
+      "north": 19.443,
+      "res": 0.0025,
+      "width": 126,
+      "height": 280,
+      "crs": "EPSG:4326"
+    }
+  },
+  "gapfill_holdout": {
+    "all": {
+      "n": 214,
+      "r2": 0.8985615497536354,
+      "rmse": 5.2354725734465966,
+      "mae": 3.6722718126367964,
+      "mbe": -0.2820760994648126,
+      "pearson_r": 0.9481163256453821
+    },
+    "n_holdout": 214,
+    "rf": {
+      "n": 180,
+      "r2": 0.9236608585188975,
+      "rmse": 4.761042563302274,
+      "mae": 3.38691301015426,
+      "mbe": -0.21144614382583238,
+      "pearson_r": 0.961529004360294
+    },
+    "median_mosaic": {
+      "n": 34,
+      "r2": -0.006992867503093914,
+      "rmse": 7.246951294654081,
+      "mae": 5.182994884603164,
+      "mbe": -0.6559993940241197,
+      "pearson_r": 0.46680995624247457
+    }
+  },
+  "gapfill": {
+    "days": 30,
+    "rf_days": 21,
+    "fallback_days": 9,
+    "cloudy_fraction_in": 0.6342592592592593,
+    "nan_fraction_out": 0.0,
+    "pixels_by_method": {
+      "observed": 1975,
+      "rf_imputed": 1909,
+      "median_mosaic": 1516,
+      "climatology_or_spatial": 0
+    },
+    "rf_feature_importance": {
+      "ring3": 0.9491936072990174,
+      "ring5": 0.008022433156033622,
+      "climatology": 0.007145065799060732,
+      "lag1": 0.006632538722729429,
+      "co": 0.00351399076547648,
+      "ssrd": 0.0031462209731331825,
+      "lag2": 0.0026684337603961124,
+      "v10": 0.002614104817404451,
+      "sp": 0.002426489984543788,
+      "tp": 0.0023428739764353806,
+      "t2m": 0.002313680946129446,
+      "u10": 0.0022924021127483664,
+      "wind_speed": 0.002195152913893551,
+      "blh": 0.001953475879424333,
+      "lat": 0.0012754132492143043,
+      "lon": 0.001113855197877286,
+      "day_mean": 0.0005415411763738084,
+      "doy_sin": 0.00037156893367731723,
+      "doy_cos": 0.00023715033643119068
+    }
+  },
+  "downscaler": {
+    "feature_names": [
+      "elevation",
+      "slope",
+      "ndvi",
+      "built_up",
+      "road_density",
+      "night_lights",
+      "ghsl_built",
+      "population",
+      "power_plants",
+      "u10",
+      "v10",
+      "wind_speed",
+      "blh",
+      "sp",
+      "t2m",
+      "no2_ring",
+      "no2_day_mean",
+      "doy_sin",
+      "doy_cos"
+    ],
+    "static_features": [
+      "elevation",
+      "slope",
+      "ndvi",
+      "built_up",
+      "road_density",
+      "night_lights",
+      "ghsl_built",
+      "population",
+      "power_plants"
+    ],
+    "refine_factor": 14,
+    "n_trees": 320,
+    "n_train_samples": 1975,
+    "trained_period": [
+      "2026-08-24",
+      "2026-09-22"
+    ],
+    "temporal_holdout_coarse": {
+      "n": 459,
+      "r2": 0.8388789662190376,
+      "rmse": 9.699490319094673,
+      "mae": 5.161792495411725,
+      "mbe": -3.094423852974553,
+      "pearson_r": 0.9504390099919834
+    },
+    "feature_importance": {
+      "no2_ring": 0.566930890083313,
+      "no2_day_mean": 0.15454143285751343,
+      "power_plants": 0.04994365572929382,
+      "night_lights": 0.032541923224925995,
+      "v10": 0.03136002644896507,
+      "doy_sin": 0.0295844879001379,
+      "road_density": 0.020751534029841423,
+      "u10": 0.0203161109238863,
+      "population": 0.012635034509003162,
+      "sp": 0.010932347737252712,
+      "wind_speed": 0.010873144492506981,
+      "blh": 0.009429480880498886,
+      "ndvi": 0.008256335742771626,
+      "slope": 0.007887599989771843,
+      "elevation": 0.007855791598558426,
+      "built_up": 0.007825827226042747,
+      "t2m": 0.007227636873722076,
+      "ghsl_built": 0.0064554898999631405,
+      "doy_cos": 0.004651178140193224
+    },
+    "config": {
+      "n_estimators": 800,
+      "max_depth": 6,
+      "learning_rate": 0.05,
+      "subsample": 0.8,
+      "colsample_bytree": 0.8,
+      "min_child_weight": 3.0,
+      "early_stopping_rounds": 50,
+      "validation_fraction": 0.2,
+      "backprojection_iterations": 5,
+      "random_state": 42
+    },
+    "target_units": "umol m-2"
+  },
+  "pretrained_surface_model": {
+    "source": "/Users/dhairyapunitjani/Development/Internal Hackathon 2026/InternalHackathon/backend/ml_engine/pretrained/no2_surface_24h.joblib",
+    "model": "xgb_full"
+  },
+  "dispersion": {
+    "base_time": "2026-09-22",
+    "mean_u_ms": NaN,
+    "mean_v_ms": NaN,
+    "mean_speed_ms": NaN,
+    "plume_heading_deg": NaN,
+    "drift_km_per_hour": NaN,
+    "horizon_domain_mean_ugm3": {
+      "1.0": NaN,
+      "3.0": NaN,
+      "6.0": NaN
+    }
+  },
+  "timings_s": {
+    "ingest": 432.77,
+    "gapfill_validation": 0.78,
+    "gapfill": 0.92,
+    "downscale_train": 1.31,
+    "downscale_inference": 0.83,
+    "surface_model": 0.67,
+    "dispersion": 0.2,
+    "export": 1.58
+  },
+  "outputs": {
+    "coarse_raw_nc": "outputs/runs/94454875936edefe/coarse_raw.nc",
+    "gapfilled_nc": "outputs/runs/94454875936edefe/coarse_gapfilled.nc",
+    "column_fine_nc": "outputs/runs/94454875936edefe/no2_column_fine.nc",
+    "surface_nc": "outputs/runs/94454875936edefe/no2_surface_fine.nc",
+    "static_nc": "outputs/runs/94454875936edefe/static_fine.nc",
+    "raw_tif": "outputs/runs/94454875936edefe/no2_raw_coarse_2026-09-22.tif",
+    "gapfilled_tif": "outputs/runs/94454875936edefe/no2_gapfilled_coarse_2026-09-22.tif",
+    "surface_tif": "outputs/runs/94454875936edefe/no2_surface_fine_2026-09-22.tif",
+    "forecast_tif": "outputs/runs/94454875936edefe/no2_forecast_2026-09-22.tif",
+    "surface_csv": "outputs/runs/94454875936edefe/no2_surface_fine_2026-09-22.csv",
+    "surface_points_geojson": "outputs/runs/94454875936edefe/no2_surface_points_2026-09-22.geojson",
+    "hazard_geojson": "outputs/runs/94454875936edefe/no2_hazard_bands_2026-09-22.geojson",
+    "wind_geojson": "outputs/runs/94454875936edefe/wind_vectors_2026-09-22.geojson",
+    "forecast_hazard_1h_geojson": "outputs/runs/94454875936edefe/no2_hazard_bands_2026-09-22_plus1h.geojson",
+    "forecast_hazard_3h_geojson": "outputs/runs/94454875936edefe/no2_hazard_bands_2026-09-22_plus3h.geojson",
+    "forecast_hazard_6h_geojson": "outputs/runs/94454875936edefe/no2_hazard_bands_2026-09-22_plus6h.geojson",
+    "daily": {
+      "2026-08-24": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-24/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-24/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-24/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-24/no2_hazard_bands.geojson"
+      },
+      "2026-08-25": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-25/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-25/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-25/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-25/no2_hazard_bands.geojson"
+      },
+      "2026-08-26": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-26/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-26/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-26/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-26/no2_hazard_bands.geojson"
+      },
+      "2026-08-27": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-27/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-27/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-27/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-27/no2_hazard_bands.geojson"
+      },
+      "2026-08-28": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-28/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-28/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-28/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-28/no2_hazard_bands.geojson"
+      },
+      "2026-08-29": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-29/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-29/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-29/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-29/no2_hazard_bands.geojson"
+      },
+      "2026-08-30": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-30/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-30/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-30/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-30/no2_hazard_bands.geojson"
+      },
+      "2026-08-31": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-08-31/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-08-31/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-08-31/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-08-31/no2_hazard_bands.geojson"
+      },
+      "2026-09-01": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-01/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-01/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-01/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-01/no2_hazard_bands.geojson"
+      },
+      "2026-09-02": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-02/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-02/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-02/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-02/no2_hazard_bands.geojson"
+      },
+      "2026-09-03": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-03/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-03/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-03/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-03/no2_hazard_bands.geojson"
+      },
+      "2026-09-04": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-04/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-04/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-04/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-04/no2_hazard_bands.geojson"
+      },
+      "2026-09-05": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-05/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-05/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-05/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-05/no2_hazard_bands.geojson"
+      },
+      "2026-09-06": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-06/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-06/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-06/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-06/no2_hazard_bands.geojson"
+      },
+      "2026-09-07": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-07/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-07/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-07/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-07/no2_hazard_bands.geojson"
+      },
+      "2026-09-08": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-08/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-08/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-08/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-08/no2_hazard_bands.geojson"
+      },
+      "2026-09-09": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-09/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-09/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-09/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-09/no2_hazard_bands.geojson"
+      },
+      "2026-09-10": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-10/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-10/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-10/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-10/no2_hazard_bands.geojson"
+      },
+      "2026-09-11": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-11/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-11/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-11/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-11/no2_hazard_bands.geojson"
+      },
+      "2026-09-12": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-12/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-12/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-12/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-12/no2_hazard_bands.geojson"
+      },
+      "2026-09-13": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-13/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-13/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-13/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-13/no2_hazard_bands.geojson"
+      },
+      "2026-09-14": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-14/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-14/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-14/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-14/no2_hazard_bands.geojson"
+      },
+      "2026-09-15": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-15/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-15/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-15/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-15/no2_hazard_bands.geojson"
+      },
+      "2026-09-16": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-16/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-16/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-16/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-16/no2_hazard_bands.geojson"
+      },
+      "2026-09-17": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-17/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-17/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-17/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-17/no2_hazard_bands.geojson"
+      },
+      "2026-09-18": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-18/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-18/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-18/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-18/no2_hazard_bands.geojson"
+      },
+      "2026-09-19": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-19/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-19/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-19/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-19/no2_hazard_bands.geojson"
+      },
+      "2026-09-20": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-20/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-20/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-20/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-20/no2_hazard_bands.geojson"
+      },
+      "2026-09-21": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-21/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-21/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-21/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-21/no2_hazard_bands.geojson"
+      },
+      "2026-09-22": {
+        "surface_tif": "outputs/runs/94454875936edefe/daily/2026-09-22/no2_surface_fine.tif",
+        "raw_tif": "outputs/runs/94454875936edefe/daily/2026-09-22/no2_raw_coarse.tif",
+        "gapfilled_tif": "outputs/runs/94454875936edefe/daily/2026-09-22/no2_gapfilled_coarse.tif",
+        "hazard_geojson": "outputs/runs/94454875936edefe/daily/2026-09-22/no2_hazard_bands.geojson"
+      }
+    }
+  }
+}

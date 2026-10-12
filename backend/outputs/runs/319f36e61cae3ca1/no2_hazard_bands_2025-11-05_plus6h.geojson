@@ -1,0 +1,1 @@
+{"type":"FeatureCollection","features":[{"type":"Feature","geometry":{"type":"Polygon","coordinates":[[[72.77,19.32],[72.77,18.865000000000002],[73.11999999999999,18.865000000000002],[73.11999999999999,19.32],[72.77,19.32]]]},"properties":{"category":"Normal","color":"#2e7d32","advice":"Air quality is satisfactory.","min_ugm3":0.0,"max_ugm3":40.0}}]}
