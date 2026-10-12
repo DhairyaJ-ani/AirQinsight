@@ -395,3 +395,163 @@ class EnsembleDownscaler:
     def _require_fitted(self):
         if self.xgb_model is None or self.rf_model is None or self.lgb_model is None or self.features is None:
             raise RuntimeError("EnsembleDownscaler is not fully trained or loaded")
+
+
+def temporal_split(
+    df: pd.DataFrame,
+    time_col: str = "time",
+    val_fraction: float = 0.2,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Chronological train/val split ensuring no future information leaks into training.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataset containing a timestamp or chronological sequence column.
+    time_col : str
+        Column used for sorting and splitting.
+    val_fraction : float
+        Fraction of recent observations reserved for validation.
+
+    Returns
+    -------
+    (train_df, val_df)
+    """
+    if time_col not in df.columns:
+        # Fallback to index-based chronological split if time_col not present
+        split_idx = int(len(df) * (1.0 - val_fraction))
+        return df.iloc[:split_idx].copy(), df.iloc[split_idx:].copy()
+
+    df_sorted = df.sort_values(by=time_col).reset_index(drop=True)
+    split_idx = int(len(df_sorted) * (1.0 - val_fraction))
+    return df_sorted.iloc[:split_idx].copy(), df_sorted.iloc[split_idx:].copy()
+
+
+def spatial_split(
+    df: pd.DataFrame,
+    lat_col: str = "lat",
+    lon_col: str = "lon",
+    n_spatial_blocks: int = 5,
+    val_block_idx: int = 0,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Spatial block cross-validation split (leave-spatial-cluster-out).
+
+    Prevents spatial autocorrelation leakage between training and validation pixels.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Dataset containing spatial coordinates.
+    lat_col, lon_col : str
+        Latitude and longitude column names.
+    n_spatial_blocks : int
+        Number of latitude-longitude grid partitions.
+    val_block_idx : int
+        Index of the partition held out for validation [0, n_spatial_blocks - 1].
+
+    Returns
+    -------
+    (train_df, val_df)
+    """
+    if lat_col not in df.columns or lon_col not in df.columns:
+        # Fallback to regular k-fold partition
+        block_ids = np.arange(len(df)) % n_spatial_blocks
+    else:
+        # Simple coordinate binning to create disjoint geographical blocks
+        lat_bins = pd.qcut(df[lat_col], q=min(n_spatial_blocks, df[lat_col].nunique()), labels=False, duplicates="drop")
+        block_ids = lat_bins.to_numpy()
+
+    val_mask = (block_ids == val_block_idx)
+    return df[~val_mask].copy(), df[val_mask].copy()
+
+
+def calibrate_ensemble_weights_on_val(
+    y_true_val: np.ndarray,
+    preds_val: dict[str, np.ndarray],
+    metric: str = "r2",
+    step: float = 0.05,
+) -> dict[str, float]:
+    """Grid-search over convex combinations of model predictions to maximize validation performance.
+
+    Never touches the test set. Ensures weights sum to 1.0 and are non-negative.
+
+    Parameters
+    ----------
+    y_true_val : np.ndarray
+        Ground truth values on the validation set.
+    preds_val : dict[str, np.ndarray]
+        Dict of model_name -> 1D prediction array on the validation set.
+        Must include keys for 'xgboost', 'random_forest', and 'lightgbm'.
+    metric : str
+        'r2' (maximize) or 'rmse' (minimize).
+    step : float
+        Grid step size for weight exploration (default 0.05).
+
+    Returns
+    -------
+    dict[str, float]
+        Calibrated weights {'xgboost': w_xgb, 'random_forest': w_rf, 'lightgbm': w_lgb}.
+    """
+    y_true = np.asarray(y_true_val, dtype=np.float64).ravel()
+    models = list(preds_val.keys())
+    if not models:
+        raise ValueError("preds_val must contain at least one model prediction")
+
+    pred_matrix = np.column_stack([np.asarray(preds_val[m], dtype=np.float64).ravel() for m in models])
+    if len(y_true) != len(pred_matrix):
+        raise ValueError(f"Length mismatch: y_true_val has {len(y_true)} elements, but predictions have {len(pred_matrix)} rows.")
+
+    # Filter out any non-finite values across y_true or preds
+    valid = np.isfinite(y_true) & np.all(np.isfinite(pred_matrix), axis=1)
+
+    if not np.any(valid):
+        # Degenerate case: no valid observations; return equal default weights
+        eq_w = round(1.0 / len(models), 3)
+        return {m: eq_w for m in models}
+
+    y_true = y_true[valid]
+    pred_matrix = pred_matrix[valid]
+
+    best_score = -float("inf") if metric == "r2" else float("inf")
+    best_weights = {m: round(1.0 / len(models), 3) for m in models}
+
+    # Variance of ground truth; if zero (constant target), R² is degenerate; fallback to RMSE
+    ss_tot = float(np.sum((y_true - np.mean(y_true)) ** 2))
+    if ss_tot < 1e-12:
+        metric = "rmse"
+
+    # Generate simplex grid for models: weights sum to 1.0, w_i >= 0
+    steps = max(1, int(round(1.0 / step)))
+
+    if len(models) == 3:
+        for i in range(steps + 1):
+            for j in range(steps + 1 - i):
+                k = steps - i - j
+                w0, w1, w2 = i * step, j * step, k * step
+                w_vec = np.array([w0, w1, w2], dtype=np.float64)
+                fused = pred_matrix @ w_vec
+                err = fused - y_true
+                if metric == "r2":
+                    ss_res = float(np.sum(err ** 2))
+                    score = 1.0 - (ss_res / ss_tot)
+                    if score > best_score:
+                        best_score = score
+                        best_weights = {models[0]: round(w0, 3), models[1]: round(w1, 3), models[2]: round(w2, 3)}
+                else:
+                    rmse = float(np.sqrt(np.mean(err ** 2)))
+                    if rmse < best_score:
+                        best_score = rmse
+                        best_weights = {models[0]: round(w0, 3), models[1]: round(w1, 3), models[2]: round(w2, 3)}
+    else:
+        # For arbitrary model counts, normalize equal weighting
+        best_weights = {m: round(1.0 / len(models), 3) for m in models}
+
+    # Guarantee weights sum exactly to 1.0
+    s = sum(best_weights.values())
+    if s > 0:
+        first_m = models[0]
+        best_weights[first_m] = round(best_weights[first_m] + (1.0 - s), 3)
+
+    return best_weights
+
+

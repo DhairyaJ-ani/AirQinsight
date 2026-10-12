@@ -237,3 +237,120 @@ class ForecastMetrics:
             "─────────────────────────────────────────────────────",
         ]
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Persistence baseline
+# ---------------------------------------------------------------------------
+
+class PersistenceBaseline:
+    """Evaluate persistence forecast skill per horizon.
+
+    The persistence forecast predicts the same field at all future horizons:
+        ŷ(t + k) = y(t)   for all k ∈ {1, 2, …, horizons}
+
+    This is the scientifically required null hypothesis for any forecast
+    improvement claim.  Metrics are comparable to ForecastMetrics.
+
+    Parameters
+    ----------
+    horizon_mins : list of forecast horizon labels in minutes, e.g. [30, 60, 90, 120].
+
+    Usage
+    -----
+        baseline = PersistenceBaseline([30, 60, 90, 120])
+        result = baseline.evaluate(initial_field, target_sequence)
+        print(result.summary_str())
+    """
+
+    def __init__(self, horizon_mins: list[int]):
+        self.horizon_mins = horizon_mins
+
+    def evaluate(
+        self,
+        initial_field: np.ndarray,    # (H, W) – observation at t=0
+        targets: np.ndarray,           # (horizons, H, W) – true future fields
+        lats: np.ndarray | None = None,
+        lons: np.ndarray | None = None,
+    ) -> "PersistenceResult":
+        """Compute per-horizon and overall persistence baseline metrics.
+
+        Parameters
+        ----------
+        initial_field : (H, W) the last observed field, used as the persistence prediction.
+        targets       : (horizons, H, W) actual future fields.
+        lats, lons    : optional coordinate arrays for plume displacement.
+
+        Returns
+        -------
+        PersistenceResult with per_horizon and overall dicts.
+        """
+        n_horizons = targets.shape[0]
+        assert n_horizons == len(self.horizon_mins), (
+            f"Expected {len(self.horizon_mins)} horizons, got {n_horizons}"
+        )
+        # Persistence prediction: tile initial_field across all horizons
+        persistence = np.stack([initial_field] * n_horizons, axis=0)  # (H, horizons, W)
+
+        per_h = []
+        for i, h_min in enumerate(self.horizon_mins):
+            p, t = persistence[i], targets[i]
+            mask = np.isfinite(p) & np.isfinite(t)
+            if not mask.any():
+                per_h.append({
+                    "horizon_min": h_min,
+                    "rmse": float("nan"),
+                    "mae":  float("nan"),
+                    "bias": float("nan"),
+                    "r2":   float("nan"),
+                    "n_valid_pixels": 0,
+                })
+                continue
+            diff = p[mask] - t[mask]
+            ss_res = float(np.sum(diff ** 2))
+            ss_tot = float(np.sum((t[mask] - t[mask].mean()) ** 2))
+            per_h.append({
+                "horizon_min":    h_min,
+                "rmse":           float(np.sqrt(np.mean(diff ** 2))),
+                "mae":            float(np.mean(np.abs(diff))),
+                "bias":           float(np.mean(diff)),
+                "r2":             float(1.0 - ss_res / ss_tot) if ss_tot > 1e-12 else float("nan"),
+                "n_valid_pixels": int(mask.sum()),
+            })
+
+        def _avg(key):
+            vals = [h[key] for h in per_h if not math.isnan(h[key])]
+            return float(np.mean(vals)) if vals else float("nan")
+
+        overall = {k: _avg(k) for k in ("rmse", "mae", "bias", "r2")}
+        overall["n_horizons"] = n_horizons
+        return PersistenceResult(per_horizon=per_h, overall=overall)
+
+
+class PersistenceResult:
+    """Structured result from PersistenceBaseline.evaluate()."""
+
+    def __init__(self, per_horizon: list[dict], overall: dict):
+        self.per_horizon = per_horizon
+        self.overall = overall
+
+    def to_dict(self) -> dict:
+        return {"per_horizon": self.per_horizon, "overall": self.overall}
+
+    def summary_str(self) -> str:
+        o = self.overall
+        lines = [
+            "─── Persistence Baseline ────────────────────────────",
+            f"  RMSE (avg)    : {o['rmse']:.2f} µg m⁻³",
+            f"  MAE (avg)     : {o['mae']:.2f} µg m⁻³",
+            f"  Bias (avg)    : {o['bias']:.2f} µg m⁻³",
+            f"  R² (avg)      : {o['r2']:.3f}",
+        ]
+        for h in self.per_horizon:
+            lines.append(
+                f"  t+{h['horizon_min']:3d} min : RMSE={h['rmse']:.2f}  "
+                f"MAE={h['mae']:.2f}  R²={h['r2']:.3f}  "
+                f"N={h['n_valid_pixels']}"
+            )
+        lines.append("─────────────────────────────────────────────────────")
+        return "\n".join(lines)

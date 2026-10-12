@@ -50,7 +50,9 @@ flowchart TD
 - `ml_engine/service.py`: Computes unique run cache key including `use_ensemble` flag (preventing cache collisions between baseline and ensemble).
 - `ml_engine/pipeline.py`: Stage 3 selects between `NO2Downscaler` and `EnsembleDownscaler`. Saves and roundtrip-loads artifact (`EnsembleDownscaler.load`) before inference.
 - `ml_engine/downscaling/ensemble.py`: Implements `EnsembleDownscaler`, `predict_features()`, `predict_day_ensemble()`, `predict()`, `save()`, and `load()`.
-- `ml_engine/xai/shap_service.py`: `explain_ensemble_downscaler()` executes TreeSHAP on the primary XGBoost component, augmented with explicit ensemble prediction, weights, and inter-model disagreement.
+- `ml_engine/xai/shap_service.py`: 
+  - `explain_ensemble_downscaler()`: TreeSHAP on primary XGBoost component with explicit labeling, reported component weight, and inter-model disagreement.
+  - `explain_weighted_ensemble_exact()`: Exact additive TreeSHAP for the weighted ensemble itself, combining component TreeSHAP vectors via exact model addition linearity: $\text{SHAP}_{\text{ens}} = \sum w_i \text{SHAP}_i$.
 
 ---
 
@@ -58,19 +60,23 @@ flowchart TD
 
 | Component | Target Predicted | Features Used | Training Labels | Fitting Status | Weight / Fusion |
 |---|---|---|---|---|---|
-| **XGBoost** | Coarse tropospheric NO₂ column ($\mu\text{mol}/\text{m}^2$) | Static land use (road density, built-up, elevation, NDVI, population, power plants) + ERA5 meteorology ($u_{10}, v_{10}, \text{blh}, \text{sp}, t_{2m}, \text{wind speed}$) + Context ($\text{ring}, \text{day mean}, \sin, \cos$) | Coarse TROPOMI observed pixels (cloud-masked pixels excluded) | Fully fitted jointly in `EnsembleDownscaler.fit()` | 0.50 (normalized) |
-| **Random Forest** | Same as above | Same as above | Same as above | Fully fitted in `EnsembleDownscaler.fit()` | 0.30 (normalized) |
-| **LightGBM** | Same as above | Same as above | Same as above | Fully fitted in `EnsembleDownscaler.fit()` | 0.20 (normalized) |
+| **XGBoost** | Coarse tropospheric NO₂ column ($\mu\text{mol}/\text{m}^2$) | Static land use (road density, built-up, elevation, NDVI, population, power plants) + ERA5 meteorology ($u_{10}, v_{10}, \text{blh}, \text{sp}, t_{2m}, \text{wind speed}$) + Context ($\text{ring}, \text{day mean}, \sin, \cos$) | Coarse TROPOMI observed pixels (cloud-masked pixels excluded) | Fully fitted jointly in `EnsembleDownscaler.fit()` | 0.50 (heuristic) / 0.240 (val-calibrated) |
+| **Random Forest** | Same as above | Same as above | Same as above | Fully fitted in `EnsembleDownscaler.fit()` | 0.30 (heuristic) / 0.363 (val-calibrated) |
+| **LightGBM** | Same as above | Same as above | Same as above | Fully fitted in `EnsembleDownscaler.fit()` | 0.20 (heuristic) / 0.397 (val-calibrated) |
 | **Ensemble Fusion** | Weighted column prediction | Same as above | Weighted linear combination | Dynamic weights with validation | $\sum w_i y_i$ |
 
 ### Conservation and Back-Projection Stage
 - Back-projection conservation (`residual = field - block_mean(pred_2d, f); pred_2d += upsample_bilinear(residual, f)`) is correctly applied to the **fused ensemble map** in `predict_day_ensemble()`. This strictly preserves coarse-pixel integral mass conservation for the ensemble output.
 
+### Ground-Level Surface Calibration Boundary
+- **CPCB Station Matching (`data/cpcb_mumbai.csv`):** 28 active monitoring stations inside the Mumbai bounds ($72.77^\circ\text{E} - 73.12^\circ\text{E}, 18.86^\circ\text{N} - 19.32^\circ\text{N}$), comprising 1,560 daily observations (1,401 matched with cloud-free satellite overpasses).
+- **Physical Unit Decoupling:** Ground station values represent surface concentrations ($\mu\text{g}/\text{m}^3$), whereas base downscaling targets are tropospheric columns ($\mu\text{mol}/\text{m}^2$). Raw correlation between coarse column density and surface monitor readings is $r = 0.086$, establishing that raw downscaled satellite columns cannot be directly evaluated against ground stations without boundary layer scaling and Stage 4 `SurfaceModel` calibration.
+
 ---
 
 ## 4. Defects Found & Fixes Made
 
-During validation, 4 critical defects were identified and resolved:
+During validation, 5 critical defects and enhancements were addressed:
 
 1. **LightGBM Deserialization & Prediction Failure (`NotFittedError` / Segfault):**
    - *Defect:* `EnsembleDownscaler.load()` recreated `LGBMRegressor` and loaded only the raw text booster file (`LGB_FILE`), leaving scikit-learn wrapper fitted flags (`fitted_`, `n_features_in_`) unpopulated, or encountering C ABI memory faults during `predict()` under Python 3.14.
@@ -84,11 +90,13 @@ During validation, 4 critical defects were identified and resolved:
 4. **Ambiguous Ensemble Explainability:**
    - *Defect:* `explain_ensemble_downscaler()` did not explicitly identify that feature attribution percentages originate from the primary XGBoost component, which could mislead users into believing a single additive SHAP model explains 3 disparate tree architectures.
    - *Fix:* Explicitly labeled executive summary and narrative with `[XGBoost Component SHAP]`, reported component weight ($0.50$), ensemble prediction, and inter-model disagreement. Added non-finite input validation.
+5. **Exact Additive Multi-Model TreeSHAP:**
+   - *Enhancement:* Added `explain_weighted_ensemble_exact()` in `ml_engine/xai/shap_service.py` exploiting TreeSHAP's strict linearity under model addition: $\text{SHAP}_{\text{ens}}(X) = \sum w_i \text{SHAP}_i(X)$, providing a mathematically exact explanation of the actual fused prediction.
 
 ---
 
 ## 5. Test Suite Verification
 
-- Focused tests: `backend/tests/test_downscale.py` (16/16 passed).
+- Focused tests: `backend/tests/test_downscale.py` (17/17 passed).
 - Integration tests: `backend/tests/test_ensemble_xai_simulator.py` (9/9 passed).
-- Full backend suite: 89 passed, 0 failed.
+- Full backend suite: 91 passed, 0 failed.

@@ -5,6 +5,7 @@ from .shap_service import (
     SHAPService,
     XAIExplanation,
     explain_ensemble_downscaler,
+    explain_weighted_ensemble_exact,
     get_shap_service,
 )
 from .summaries import (
@@ -18,6 +19,7 @@ __all__ = [
     "XAIExplanation",
     "get_shap_service",
     "explain_ensemble_downscaler",
+    "explain_weighted_ensemble_exact",
     "generate_waterfall_chart_base64",
     "generate_bar_chart_base64",
     "compute_relative_contributions",
