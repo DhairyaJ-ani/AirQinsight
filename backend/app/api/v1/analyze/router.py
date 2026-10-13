@@ -4,8 +4,12 @@ from app.core.config import get_supabase
 from app.dependencies import get_current_user
 from app.models.analyze import PinpointRequest, PinpointResponse
 from app.services import analyze_service
+from app.api.v1.analyze import source_assessment as _sa_module
 
 router = APIRouter()
+
+# Include source-assessment sub-router
+router.include_router(_sa_module.router, prefix="", tags=["analyze"])
 
 
 @router.post(

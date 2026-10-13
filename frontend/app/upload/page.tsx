@@ -1,16 +1,17 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Sidebar from '../components/Sidebar';
 import FileUploader from '../components/FileUploader';
 import UploadQueue from '../components/UploadQueue';
-import { UploadedSatelliteFile } from '@/lib/types';
-import { ShieldCheck, Zap, Sparkles, FolderArchive } from 'lucide-react';
+import HistoricalDatasetSelector from '../components/HistoricalDatasetSelector';
+import { ShieldCheck, Zap, Sparkles, FolderArchive, Database, UploadCloud } from 'lucide-react';
 import { useUploadContext } from '@/lib/upload-context';
 
 export default function UploadPage() {
   const router = useRouter();
+  const [activeTab, setActiveTab] = useState<'historical' | 'upload'>('historical');
   const {
     files,
     setFiles,
@@ -114,11 +115,50 @@ export default function UploadPage() {
                 return x - Math.floor(x);
               };
 
+              // Detect pollutant from file name (e.g., PM25, PM10, SO2, O3, CO, NO2)
+              const lowerName = f.name.toLowerCase();
+              let detectedPollutant = 'no2';
+              let pollutantLabel = 'NO₂';
+              let unitLabel = 'µg/m³';
+              let baseScale = 55;
+
+              if (lowerName.includes('pm25') || lowerName.includes('pm2.5')) {
+                detectedPollutant = 'pm25';
+                pollutantLabel = 'PM₂.₅';
+                unitLabel = 'µg/m³';
+                baseScale = 78;
+              } else if (lowerName.includes('pm10')) {
+                detectedPollutant = 'pm10';
+                pollutantLabel = 'PM₁₀';
+                unitLabel = 'µg/m³';
+                baseScale = 142;
+              } else if (lowerName.includes('so2')) {
+                detectedPollutant = 'so2';
+                pollutantLabel = 'SO₂';
+                unitLabel = 'µg/m³';
+                baseScale = 22;
+              } else if (lowerName.includes('o3') || lowerName.includes('ozone')) {
+                detectedPollutant = 'o3';
+                pollutantLabel = 'O₃';
+                unitLabel = 'µg/m³';
+                baseScale = 46;
+              } else if (lowerName.includes('co')) {
+                detectedPollutant = 'co';
+                pollutantLabel = 'CO';
+                unitLabel = 'µg/m³';
+                baseScale = 380;
+              } else if (lowerName.includes('no2')) {
+                detectedPollutant = 'no2';
+                pollutantLabel = 'NO₂';
+                unitLabel = lowerName.includes('tropomi') || lowerName.includes('s5p') ? 'µmol/m²' : 'µg/m³';
+                baseScale = unitLabel === 'µmol/m²' ? 62 : 48;
+              }
+
               const cloudCover = parseFloat((25 + pseudoRand(1) * 35).toFixed(1)); // 25% - 60%
-              const meanVal = parseFloat((55 + pseudoRand(2) * 38).toFixed(1));     // 55 - 93 µg/m³
-              const peakVal = parseFloat((meanVal * (2.1 + pseudoRand(3) * 0.8)).toFixed(1)); // 115 - 230 µg/m³
-              const r2Val = parseFloat((0.86 + pseudoRand(4) * 0.08).toFixed(2));  // 0.86 - 0.94
-              const rmseVal = parseFloat((3.8 + pseudoRand(5) * 1.6).toFixed(1));  // 3.8 - 5.4 µg/m³
+              const meanVal = parseFloat((baseScale + pseudoRand(2) * (baseScale * 0.4)).toFixed(1));
+              const peakVal = parseFloat((meanVal * (1.8 + pseudoRand(3) * 0.7)).toFixed(1));
+              const r2Val = parseFloat((0.86 + pseudoRand(4) * 0.08).toFixed(2));
+              const rmseVal = parseFloat((3.8 + pseudoRand(5) * 1.6).toFixed(1));
 
               // 12 coarse cells (4 cols x 3 rows) with actual cloud mask
               const rawVals: number[] = [];
@@ -148,6 +188,11 @@ export default function UploadPage() {
                   downscaledResolution: '1.0km × 1.0km',
                   meanNO2: meanVal,
                   peakNO2: peakVal,
+                  meanValue: meanVal,
+                  peakValue: peakVal,
+                  pollutant: detectedPollutant,
+                  pollutantName: pollutantLabel,
+                  units: unitLabel,
                   processingDurationSec: elapsedSec || 2.14,
                   r2Quality: r2Val,
                   validationRmse: rmseVal,
@@ -179,14 +224,14 @@ export default function UploadPage() {
                 AI / ML Pipeline Ingestion
               </span>
               <span className="text-xs text-zinc-400 font-mono">
-                CPCB / Sentinel-5P TROPOMI
+                Sentinel-5P TROPOMI / CPCB Ground Network
               </span>
             </div>
             <h1 className="text-xl font-bold text-zinc-100 mt-1 tracking-tight">
-              Satellite Scene Upload & Cloud Cleaning Model
+              Satellite Scene Ingestion & Historical Datasets
             </h1>
             <p className="text-xs text-zinc-400 mt-1 max-w-2xl leading-relaxed">
-              Upload raw satellite observation files, NetCDF grids, or entire directories of satellite scenes. The automated pipeline detects cloud voids, executes deep autoencoder imputation, and downscales coarse pixels to a sharp 1km resolution grid.
+              Explore validated Sentinel-5P historical time-series datasets or ingest custom scenes. The pipeline handles cloud void imputation, multi-pollutant metadata verification, and high-resolution spatial downscaling.
             </p>
           </div>
 
@@ -198,55 +243,96 @@ export default function UploadPage() {
           </div>
         </div>
 
-        {/* Feature Highlights Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="p-3 bg-[#141721] border border-[#242938] rounded-md">
-            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Cloud-Gap Imputation</span>
-            </div>
-            <p className="text-[11px] text-zinc-400 mt-1">
-              Fills spatial-temporal data gaps caused by convective cloud cover using ML autoencoders.
-            </p>
-          </div>
+        {/* Mode Navigation Tabs */}
+        <div className="flex items-center gap-2 border-b border-[#242938] pb-1">
+          <button
+            onClick={() => setActiveTab('historical')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-xs font-semibold transition-all cursor-pointer border-b-2 ${
+              activeTab === 'historical'
+                ? 'border-blue-500 text-blue-400 bg-[#161b2b]'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-[#141721]'
+            }`}
+          >
+            <Database className="w-4 h-4" />
+            <span>Select Bundled Historical Dataset</span>
+            <span className="ml-1 text-[10px] px-1.5 py-0.2 rounded bg-blue-500/20 text-blue-300 font-mono">
+              61 Days
+            </span>
+          </button>
 
-          <div className="p-3 bg-[#141721] border border-[#242938] rounded-md">
-            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
-              <Zap className="w-4 h-4 text-blue-400" />
-              <span>Spatial Downscaling (1km)</span>
-            </div>
-            <p className="text-[11px] text-zinc-400 mt-1">
-              Downscales coarse 7km satellite data by integrating boundary layer height, DEM, and road networks.
-            </p>
-          </div>
-
-          <div className="p-3 bg-[#141721] border border-[#242938] rounded-md">
-            <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
-              <FolderArchive className="w-4 h-4 text-teal-400" />
-              <span>Batch & Folder Support</span>
-            </div>
-            <p className="text-[11px] text-zinc-400 mt-1">
-              Select entire directory folders of scenes or time-series rasters for asynchronous processing.
-            </p>
-          </div>
+          <button
+            onClick={() => setActiveTab('upload')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-t-lg text-xs font-semibold transition-all cursor-pointer border-b-2 ${
+              activeTab === 'upload'
+                ? 'border-blue-500 text-blue-400 bg-[#161b2b]'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200 hover:bg-[#141721]'
+            }`}
+          >
+            <UploadCloud className="w-4 h-4" />
+            <span>Upload Custom Scenes & Folders</span>
+          </button>
         </div>
 
-        {/* File / Folder Dropzone */}
-        <FileUploader
-          onFilesSelected={handleFilesSelected}
-          disabled={isProcessing}
-          folderName={folderName}
-        />
+        {/* Tab 1: Historical Dataset Explorer */}
+        {activeTab === 'historical' && (
+          <HistoricalDatasetSelector />
+        )}
 
-        {/* Upload & Processing Queue */}
-        <UploadQueue
-          files={files}
-          onRemoveFile={handleRemoveFile}
-          onProcessAll={handleProcessAll}
-          onClearCompleted={handleClearCompleted}
-          isProcessing={isProcessing}
-        />
+        {/* Tab 2: Custom File / Folder Ingestion */}
+        {activeTab === 'upload' && (
+          <div className="space-y-6">
+            {/* Feature Highlights Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3 bg-[#141721] border border-[#242938] rounded-md">
+                <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>Cloud-Gap Imputation</span>
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  Fills spatial-temporal data gaps caused by convective cloud cover using ML autoencoders.
+                </p>
+              </div>
+
+              <div className="p-3 bg-[#141721] border border-[#242938] rounded-md">
+                <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                  <Zap className="w-4 h-4 text-blue-400" />
+                  <span>Spatial Downscaling (1km)</span>
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  Downscales coarse 7km satellite data by integrating boundary layer height, DEM, and road networks.
+                </p>
+              </div>
+
+              <div className="p-3 bg-[#141721] border border-[#242938] rounded-md">
+                <div className="flex items-center gap-2 text-xs font-semibold text-zinc-200">
+                  <FolderArchive className="w-4 h-4 text-teal-400" />
+                  <span>Batch & Folder Support</span>
+                </div>
+                <p className="text-[11px] text-zinc-400 mt-1">
+                  Select entire directory folders of scenes or time-series rasters for asynchronous processing.
+                </p>
+              </div>
+            </div>
+
+            {/* File / Folder Dropzone */}
+            <FileUploader
+              onFilesSelected={handleFilesSelected}
+              disabled={isProcessing}
+              folderName={folderName}
+            />
+
+            {/* Upload & Processing Queue */}
+            <UploadQueue
+              files={files}
+              onRemoveFile={handleRemoveFile}
+              onProcessAll={handleProcessAll}
+              onClearCompleted={handleClearCompleted}
+              isProcessing={isProcessing}
+            />
+          </div>
+        )}
       </main>
     </div>
   );
 }
+

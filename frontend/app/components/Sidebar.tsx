@@ -35,6 +35,7 @@ interface SidebarProps {
   onSelectRegion?: (coords: [number, number], zoom: number) => void;
   selectedCoords?: [number, number] | null;
   selectedLocationName?: string;
+  selectedPollutant?: string;
 }
 
 export default function Sidebar({
@@ -49,6 +50,7 @@ export default function Sidebar({
   onSelectRegion,
   selectedCoords,
   selectedLocationName = 'Selected area',
+  selectedPollutant = 'no2',
 }: SidebarProps) {
   const pathname = usePathname();
   const isMapPage = pathname === '/';
@@ -426,7 +428,7 @@ export default function Sidebar({
 
             {/* Standard AQI Scale */}
             <div>
-              <HazardLegend />
+              <HazardLegend pollutant={selectedPollutant} />
             </div>
           </>
         )}

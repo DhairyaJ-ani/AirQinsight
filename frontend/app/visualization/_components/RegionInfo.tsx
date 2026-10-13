@@ -11,6 +11,11 @@ export interface RegionInfoProps {
   selectedDate?: string;
   onDateChange?: (date: string) => void;
   isLoadingDate?: boolean;
+  pollutant?: string;
+  pollutantName?: string;
+  units?: string;
+  measurementType?: string;
+  datasetName?: string;
 }
 
 export default function RegionInfo({
@@ -20,6 +25,11 @@ export default function RegionInfo({
   selectedDate = '',
   onDateChange,
   isLoadingDate = false,
+  pollutant = 'no2',
+  pollutantName = 'NO₂',
+  units = 'µmol/m²',
+  measurementType = 'satellite_column',
+  datasetName,
 }: RegionInfoProps) {
   // Determine region name based on bounding box
   const regionName = useMemo(() => {
@@ -141,18 +151,18 @@ export default function RegionInfo({
           {hazardBadge.label}
         </span>
         <span className="font-mono text-[11px] font-bold">
-          {stats.mean} <span className="text-[9px] font-normal">µg/m³</span>
+          {stats.mean} <span className="text-[9px] font-normal">{units}</span>
         </span>
       </div>
 
       {/* Telemetry Stats Grid */}
       <div className="grid grid-cols-3 gap-2 text-center">
         <div className="bg-[#161a26] border border-[#242938] rounded-lg p-1.5">
-          <div className="text-[10px] text-zinc-400 uppercase font-mono">Min NO₂</div>
+          <div className="text-[10px] text-zinc-400 uppercase font-mono">Min {pollutantName}</div>
           <div className="text-xs font-mono font-bold text-emerald-400 mt-0.5">
             {stats.min}
           </div>
-          <div className="text-[9px] text-zinc-400">µg/m³</div>
+          <div className="text-[9px] text-zinc-400">{units}</div>
         </div>
 
         <div className="bg-[#161a26] border border-[#242938] rounded-lg p-1.5">
@@ -163,15 +173,15 @@ export default function RegionInfo({
           <div className="text-xs font-mono font-bold text-white mt-0.5">
             {stats.mean}
           </div>
-          <div className="text-[9px] text-zinc-400">µg/m³</div>
+          <div className="text-[9px] text-zinc-400">{units}</div>
         </div>
 
         <div className="bg-[#161a26] border border-[#242938] rounded-lg p-1.5">
-          <div className="text-[10px] text-zinc-400 uppercase font-mono">Peak NO₂</div>
+          <div className="text-[10px] text-zinc-400 uppercase font-mono">Peak {pollutantName}</div>
           <div className="text-xs font-mono font-bold text-rose-400 mt-0.5">
             {stats.max}
           </div>
-          <div className="text-[9px] text-zinc-400">µg/m³</div>
+          <div className="text-[9px] text-zinc-400">{units}</div>
         </div>
       </div>
     </div>

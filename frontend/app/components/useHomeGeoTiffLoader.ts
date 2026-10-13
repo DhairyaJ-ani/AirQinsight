@@ -5,33 +5,50 @@ import { fromArrayBuffer } from 'geotiff';
 import { DEFAULT_BBOX, generateSyntheticFrame } from '../visualization/_components/stubs';
 
 export interface HomeGeoTiffData {
-  no2: Float32Array;
+  /** Raw raster values (pollutant concentration or column density). */
+  values: Float32Array;
   width: number;
   height: number;
   bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
+  /** Which pollutant this data represents */
+  pollutant: string;
 }
+
+/** @deprecated Use `data.values` instead — alias maintained for backward compatibility with NO2HeatmapOverlay */
+export type LegacyHomeGeoTiffData = HomeGeoTiffData & { no2: Float32Array };
 
 export interface UseHomeGeoTiffLoaderReturn {
-  data: HomeGeoTiffData | null;
+  data: LegacyHomeGeoTiffData | null;
   isLoading: boolean;
   error: string | null;
-  load: () => Promise<HomeGeoTiffData>;
+  load: () => Promise<LegacyHomeGeoTiffData>;
 }
 
-const API_BASE = 'http://localhost:8000';
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
+function authHeaders(): Record<string, string> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /**
- * NO₂ grid for the home map. With ``date`` (one of the uploaded days from ``/downscale/dates``) it loads that
- * day's uploaded file exactly as the Plume Flow page does (``/downscale/geotiff?timestamp=<date>T00:00:00Z``).
+ * Loads a pollutant GeoTIFF grid for the home map.
+ *
+ * - For ``no2``: loads from ``/api/v1/downscale/geotiff?timestamp=<date>T00:00:00Z``
+ * - For other pollutants: loads from ``/api/v1/downscale/geotiff?timestamp=<date>T00:00:00Z&pollutant=<key>``
+ * - Falls back to a synthetic frame on HTTP error.
+ *
+ * The returned object includes both ``values`` (canonical) and ``no2`` (backward-compat alias
+ * so existing ``NO2HeatmapOverlay`` calls that pass ``no2:`` continue to work).
  */
-export function useHomeGeoTiffLoader(date?: string): UseHomeGeoTiffLoaderReturn {
-  const [data, setData] = useState<HomeGeoTiffData | null>(null);
+export function useHomeGeoTiffLoader(date?: string, pollutant = 'no2'): UseHomeGeoTiffLoaderReturn {
+  const [data, setData] = useState<LegacyHomeGeoTiffData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const cacheRef = useRef<Map<string, HomeGeoTiffData>>(new Map());
-  const cacheKey = date ?? 'latest';
+  const cacheRef = useRef<Map<string, LegacyHomeGeoTiffData>>(new Map());
+  const cacheKey = `${pollutant}__${date ?? 'latest'}`;
 
-  const load = useCallback(async (): Promise<HomeGeoTiffData> => {
+  const load = useCallback(async (): Promise<LegacyHomeGeoTiffData> => {
     const cached = cacheRef.current.get(cacheKey);
     if (cached) {
       setData(cached);
@@ -42,16 +59,17 @@ export function useHomeGeoTiffLoader(date?: string): UseHomeGeoTiffLoaderReturn 
     setError(null);
 
     try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
-      const headers: Record<string, string> = {};
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
+      const pol = (pollutant || 'no2').toLowerCase();
+      let url: string;
+      if (date) {
+        url = `${API_BASE}/api/v1/downscale/geotiff?timestamp=${encodeURIComponent(`${date}T00:00:00Z`)}`;
+        if (pol !== 'no2') url += `&pollutant=${encodeURIComponent(pol)}`;
+      } else {
+        url = `${API_BASE}/api/v1/downscale/geotiff`;
+        if (pol !== 'no2') url += `?pollutant=${encodeURIComponent(pol)}`;
       }
 
-      const url = date
-        ? `${API_BASE}/api/v1/downscale/geotiff?timestamp=${encodeURIComponent(`${date}T00:00:00Z`)}`
-        : `${API_BASE}/api/v1/downscale/geotiff`;
-      const response = await fetch(url, { headers });
+      const response = await fetch(url, { headers: authHeaders() });
 
       if (!response.ok) {
         throw new Error(`Server returned HTTP ${response.status}`);
@@ -62,12 +80,7 @@ export function useHomeGeoTiffLoader(date?: string): UseHomeGeoTiffLoaderReturn 
       const image = await tiff.getImage();
 
       const rawBbox = image.getBoundingBox();
-      const frameBbox: [number, number, number, number] = [
-        rawBbox[0],
-        rawBbox[1],
-        rawBbox[2],
-        rawBbox[3],
-      ];
+      const frameBbox: [number, number, number, number] = [rawBbox[0], rawBbox[1], rawBbox[2], rawBbox[3]];
 
       const width = image.getWidth();
       const height = image.getHeight();
@@ -77,13 +90,16 @@ export function useHomeGeoTiffLoader(date?: string): UseHomeGeoTiffLoaderReturn 
         throw new Error('GeoTIFF contained no raster bands');
       }
 
-      const no2 = rasters[0] as Float32Array;
+      const values = rasters[0] as Float32Array;
 
-      const loadedData: HomeGeoTiffData = {
-        no2,
+      const loadedData: LegacyHomeGeoTiffData = {
+        values,
+        // Backward-compat alias so callers using `no2:` continue to work
+        get no2() { return values; },
         width,
         height,
         bbox: frameBbox,
+        pollutant: pol,
       };
 
       cacheRef.current.set(cacheKey, loadedData);
@@ -96,11 +112,14 @@ export function useHomeGeoTiffLoader(date?: string): UseHomeGeoTiffLoaderReturn 
 
       // Fallback: smooth synthetic frame (100x100 grid) matching Visualization page
       const synth = generateSyntheticFrame(100, 100, DEFAULT_BBOX, 0);
-      const fallbackData: HomeGeoTiffData = {
-        no2: synth.no2,
+      const values = synth.no2;
+      const fallbackData: LegacyHomeGeoTiffData = {
+        values,
+        get no2() { return values; },
         width: synth.width,
         height: synth.height,
         bbox: synth.bbox,
+        pollutant: (pollutant || 'no2').toLowerCase(),
       };
 
       cacheRef.current.set(cacheKey, fallbackData);
@@ -109,17 +128,12 @@ export function useHomeGeoTiffLoader(date?: string): UseHomeGeoTiffLoaderReturn 
     } finally {
       setIsLoading(false);
     }
-  }, [date, cacheKey]);
+  }, [date, pollutant, cacheKey]);
 
   useEffect(() => {
-    if (date === '') return; // the uploaded dates are still loading
+    if (date === '') return; // uploaded dates are still loading
     load();
-  }, [load, date]);
+  }, [load, date, pollutant]);
 
-  return {
-    data,
-    isLoading,
-    error,
-    load,
-  };
+  return { data, isLoading, error, load };
 }

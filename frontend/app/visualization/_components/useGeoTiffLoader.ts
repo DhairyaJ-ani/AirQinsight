@@ -30,12 +30,26 @@ function getSeedFromTimestamp(ts: string): number {
   return (time - new Date('2024-01-01T00:00:00Z').getTime()) / (30 * 60 * 1000);
 }
 
-export function useGeoTiffLoader(timestamps: string[] = []): UseGeoTiffLoaderReturn {
+export function useGeoTiffLoader(
+  timestamps: string[] = [],
+  datasetId: string = 'no2_61day_2025',
+  pollutant: string = 'no2'
+): UseGeoTiffLoaderReturn {
   const cacheRef = useRef<Map<string, Frame>>(new Map());
   const [frames, setFrames] = useState<Map<string, Frame>>(new Map());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bbox, setBbox] = useState<[number, number, number, number] | null>(DEFAULT_BBOX);
+
+  // Clear cache if datasetId or pollutant changes
+  const prevParamsRef = useRef({ datasetId, pollutant });
+  if (
+    prevParamsRef.current.datasetId !== datasetId ||
+    prevParamsRef.current.pollutant !== pollutant
+  ) {
+    prevParamsRef.current = { datasetId, pollutant };
+    cacheRef.current.clear();
+  }
 
   // Fetch or generate frame implementation
   const fetchSingleFrame = useCallback(async (timestamp: string): Promise<Frame> => {
@@ -72,7 +86,13 @@ export function useGeoTiffLoader(timestamps: string[] = []): UseGeoTiffLoaderRet
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      const url = `${API_BASE}/api/v1/downscale/geotiff?timestamp=${encodeURIComponent(timestamp)}`;
+      const dateStr = timestamp.split('T')[0];
+      // Use historical endpoint for specific dataset or fall back to downscale
+      const url =
+        datasetId === 'no2_samples_8day'
+          ? `${API_BASE}/api/v1/historical/no2_samples_8day/${pollutant}/${dateStr}/geotiff`
+          : `${API_BASE}/api/v1/downscale/geotiff?timestamp=${encodeURIComponent(timestamp)}`;
+
       const response = await fetch(url, { headers });
 
       if (!response.ok) {

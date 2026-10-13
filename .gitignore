@@ -29,6 +29,7 @@ ENV/
 htmlcov/
 
 # Local caches & outputs
+cache/
 backend/cache/
 backend/runs/
 backend/outputs/

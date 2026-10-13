@@ -18,6 +18,10 @@ interface MapViewProps {
   timeOffsetHours?: number;
   mapTypeId?: 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
   selectedDate?: string;
+  /** Active pollutant key for the heatmap layer (default: 'no2') */
+  selectedPollutant?: string;
+  /** Callback when user clicks on an emission source marker */
+  onSelectSource?: (poi: any) => void;
 }
 
 export default function MapView(props: MapViewProps) {

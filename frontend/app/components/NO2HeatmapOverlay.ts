@@ -1,17 +1,25 @@
 import chroma from 'chroma-js';
 
 export interface NO2HeatmapOverlayOptions {
-  no2: Float32Array;
+  /** Raster values array — canonical name for all pollutants */
+  values?: Float32Array;
+  /** @deprecated alias for `values`; kept for backward compatibility */
+  no2?: Float32Array;
   width: number;
   height: number;
   bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
   opacity?: number;
-  /** 'cpcb' (default, home map): 0-320 µg/m³ hazard scale. 'vivid' (simulator): standard AQI steps
-   * capped at 200 µg/m³, so exceedances above the CPCB limit (80) turn red and >160 deep red/purple. */
+  /**
+   * Named palette (overrides auto-selection from `pollutant`).
+   * 'cpcb' (default, home map): 0-320 µg/m³ hazard scale.
+   * 'vivid' (simulator): AQI steps capped at 200 µg/m³.
+   */
   palette?: HeatmapPalette;
+  /** Selects the per-pollutant colour scale automatically when no `palette` is given. */
+  pollutant?: string;
 }
 
-export type HeatmapPalette = 'cpcb' | 'vivid';
+export type HeatmapPalette = 'cpcb' | 'vivid' | 'pm' | 'so2' | 'o3' | 'co';
 
 // Colour lookup tables (256 steps) for fast RGBA rendering.
 interface Palette {
@@ -35,19 +43,54 @@ function buildPalette(colours: string[], domain: number[], max: number): Palette
 }
 
 const PALETTES: Record<HeatmapPalette, Palette> = {
-  // CPCB hazard-based gradient (0 to 320 µg/m³): green 0-40, yellow 40-80, orange 80-180, red 180-280, purple >280
+  // NO₂ CPCB hazard-based gradient (0 to 320 µg/m³)
   cpcb: buildPalette(['#10b981', '#facc15', '#f97316', '#ef4444', '#9333ea'], [0, 40, 80, 180, 320], 320),
-  // AQI-style steps capped at 200 µg/m³: moderate exceedances go orange/red, extremes deep red/purple
+  // Simulator AQI steps capped at 200 µg/m³
   vivid: buildPalette(
     ['#10b981', '#eab308', '#f97316', '#ef4444', '#dc2626', '#9333ea'],
     [0, 40, 80, 120, 160, 200],
     200,
   ),
+  // PM₂.₅ / PM₁₀ — WHO 15/24-h and CPCB 60/100 µg/m³ breakpoints
+  pm: buildPalette(
+    ['#22d3ee', '#86efac', '#facc15', '#f97316', '#ef4444', '#7c3aed'],
+    [0, 15, 60, 100, 150, 250],
+    250,
+  ),
+  // SO₂ — CPCB 80 µg/m³ and WHO 40 µg/m³ breakpoints
+  so2: buildPalette(
+    ['#a3e635', '#facc15', '#fb923c', '#ef4444', '#9f1239'],
+    [0, 40, 80, 200, 500],
+    500,
+  ),
+  // O₃ — CPCB 100 µg/m³ 8-h breakpoints
+  o3: buildPalette(
+    ['#5eead4', '#a3e635', '#facc15', '#f97316', '#dc2626'],
+    [0, 60, 100, 160, 240],
+    240,
+  ),
+  // CO — CPCB 2 mg/m³ = 2000 µg/m³
+  co: buildPalette(
+    ['#67e8f9', '#86efac', '#fde047', '#fb923c', '#dc2626'],
+    [0, 500, 1000, 2000, 4000],
+    4000,
+  ),
 };
+
+/** Pick the right palette key for a pollutant string */
+function paletteForPollutant(pollutant?: string): HeatmapPalette {
+  if (!pollutant) return 'cpcb';
+  const p = pollutant.toLowerCase();
+  if (p === 'pm25' || p === 'pm10') return 'pm';
+  if (p === 'so2') return 'so2';
+  if (p === 'o3') return 'o3';
+  if (p === 'co') return 'co';
+  return 'cpcb'; // no2 default
+}
 
 export interface INO2HeatmapOverlay {
   setMap(map: any): void;
-  updateData(options: { no2: Float32Array; width: number; height: number; bbox: [number, number, number, number] }): void;
+  updateData(options: { values?: Float32Array; no2?: Float32Array; width: number; height: number; bbox: [number, number, number, number]; pollutant?: string; palette?: HeatmapPalette }): void;
   setOpacity(opacity: number): void;
 }
 
@@ -75,12 +118,14 @@ export function createNO2HeatmapOverlay(options: NO2HeatmapOverlayOptions): INO2
 
     constructor(opts: NO2HeatmapOverlayOptions) {
       super();
-      this.no2 = opts.no2;
+      // Accept both `values` (canonical) and `no2` (legacy alias)
+      this.no2 = (opts.values ?? opts.no2) as Float32Array;
       this.gridWidth = opts.width;
       this.gridHeight = opts.height;
       this.bbox = opts.bbox;
       this.opacity = opts.opacity ?? 0.75;
-      this.palette = PALETTES[opts.palette ?? 'cpcb'];
+      const paletteKey = opts.palette ?? paletteForPollutant(opts.pollutant);
+      this.palette = PALETTES[paletteKey] ?? PALETTES['cpcb'];
     }
 
     onAdd(): void {
@@ -209,11 +254,15 @@ export function createNO2HeatmapOverlay(options: NO2HeatmapOverlayOptions): INO2
       this.offscreenCanvas = null;
     }
 
-    updateData(opts: { no2: Float32Array; width: number; height: number; bbox: [number, number, number, number] }): void {
-      this.no2 = opts.no2;
+    updateData(opts: { values?: Float32Array; no2?: Float32Array; width: number; height: number; bbox: [number, number, number, number]; pollutant?: string; palette?: HeatmapPalette }): void {
+      this.no2 = (opts.values ?? opts.no2) as Float32Array;
       this.gridWidth = opts.width;
       this.gridHeight = opts.height;
       this.bbox = opts.bbox;
+      if (opts.palette || opts.pollutant) {
+        const paletteKey = opts.palette ?? paletteForPollutant(opts.pollutant);
+        this.palette = PALETTES[paletteKey] ?? PALETTES['cpcb'];
+      }
 
       if (this.offscreenCanvas) {
         this.offscreenCanvas.width = this.gridWidth;

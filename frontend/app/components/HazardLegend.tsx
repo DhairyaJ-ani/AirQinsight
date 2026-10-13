@@ -2,17 +2,21 @@
 
 import React from 'react';
 import { REGULATORY_SCALES } from '@/lib/constants';
+import { POLLUTANT_DEFS } from './PollutantSelector';
 
 interface HazardLegendProps {
   compact?: boolean;
+  pollutant?: string;
 }
 
-export default function HazardLegend({ compact = false }: HazardLegendProps) {
+export default function HazardLegend({ compact = false, pollutant = 'no2' }: HazardLegendProps) {
+  const pol = POLLUTANT_DEFS.find((p) => p.key === pollutant.toLowerCase()) || POLLUTANT_DEFS[0];
+
   if (compact) {
     return (
       <div className="flex flex-col gap-1.5 p-2 bg-[#141721]/90 border border-[#242938] rounded-md backdrop-blur-sm text-xs shadow-lg">
         <div className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider mb-0.5">
-          NO₂ Regulatory Index (µg/m³)
+          {pol.formula} Regulatory Index ({pol.units})
         </div>
         <div className="flex items-center gap-1 w-full">
           {REGULATORY_SCALES.map((scale) => (
@@ -38,9 +42,9 @@ export default function HazardLegend({ compact = false }: HazardLegendProps) {
     <div className="bg-[#141721] border border-[#242938] rounded-md p-3 text-xs shadow-md">
       <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#242938]">
         <span className="font-semibold text-zinc-200 tracking-wide">
-          NAAQS / WHO NO₂ Thresholds
+          NAAQS / WHO {pol.formula} Thresholds
         </span>
-        <span className="text-[10px] font-mono text-zinc-400">µg/m³ standard</span>
+        <span className="text-[10px] font-mono text-zinc-400">{pol.units} standard</span>
       </div>
 
       {/* Atmospheric continuous gradient bar matching the heatmap overlay */}

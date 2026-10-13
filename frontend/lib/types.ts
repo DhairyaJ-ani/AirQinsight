@@ -92,8 +92,13 @@ export interface UploadedSatelliteFile {
     cloudCoverCleaned: number; // %
     originalResolution: string; // e.g. "7km x 3.5km"
     downscaledResolution: string; // e.g. "1km x 1km"
-    meanNO2: number; // µg/m³
-    peakNO2: number; // µg/m³
+    meanNO2: number; // legacy alias or primary mean
+    peakNO2: number; // legacy alias or primary peak
+    pollutant?: string;
+    pollutantName?: string;
+    units?: string;
+    meanValue?: number;
+    peakValue?: number;
     processingDurationSec: number;
     r2Quality?: number;
     validationRmse?: number;
@@ -104,3 +109,34 @@ export interface UploadedSatelliteFile {
   _file?: File;
   error?: string;
 }
+
+export interface HistoricalDatasetInfo {
+  id: string;
+  display_name: string;
+  description: string;
+  pollutant: string;
+  measurement_type: string;
+  units: string;
+  provider: string;
+  date_start: string;
+  date_end: string;
+  crs: string;
+  native_resolution_deg: number;
+  native_resolution_km: number;
+  bounds: { west: number; south: number; east: number; north: number };
+  grid: { width: number; height: number };
+  nodata_convention: string;
+  purpose: string;
+}
+
+export interface PollutantAvailability {
+  pollutant: string;
+  display_name: string;
+  formula: string;
+  units: string;
+  has_raster_data_nov_dec_2025: boolean;
+  unavailability_reason?: string;
+  acquisition_script?: string;
+  dataset_ids?: string[];
+}
+

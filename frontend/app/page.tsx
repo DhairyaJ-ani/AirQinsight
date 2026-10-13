@@ -8,8 +8,10 @@ import MapView from './components/MapView';
 import LocationSearch from './components/LocationSearch';
 import TrendPanel from './components/TrendPanel';
 import ReportGenerator from './components/ReportGenerator';
+import PollutantSelector, { POLLUTANT_DEFS } from './components/PollutantSelector';
+import SourcePopup from './components/SourcePopup';
 import { calculateAttribution, getHazardCategory, PRESET_REGIONS } from '@/lib/constants';
-import { PinpointAttributionResult } from '@/lib/types';
+import { PinpointAttributionResult, POISource } from '@/lib/types';
 import { useAuth } from '@/lib/auth-context';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
@@ -59,6 +61,12 @@ export default function HomePage() {
     windVectors: false,
     pois: false,
   });
+
+  // Selected pollutant state ('no2' | 'pm25' | 'pm10' | 'so2' | 'o3' | 'co')
+  const [selectedPollutant, setSelectedPollutant] = useState<string>('no2');
+
+  // Active emission source clicked by user for agentic assessment
+  const [activeSource, setActiveSource] = useState<POISource | null>(null);
 
   // Pinpoint intelligence analysis data
   // Uploaded days (same source as the Plume Flow page) and the one shown on the map / in the pinpoint card
@@ -180,6 +188,7 @@ export default function HomePage() {
         onSelectRegion={handleSelectRegion}
         selectedCoords={selectedCoords}
         selectedLocationName={selectedLocationName}
+        selectedPollutant={selectedPollutant}
       />
 
       {/* Main Map Canvas Area */}
@@ -210,11 +219,17 @@ export default function HomePage() {
             selectedLocationName={selectedLocationName}
           />
 
-          {/* TROPOMI Blinking Light Box - exact h-10, px-3, whitespace-nowrap */}
-          <div className="hidden sm:flex items-center gap-2 h-10 px-3 bg-[#141721]/95 border border-[#2e3547] rounded-md text-xs shadow-xl backdrop-blur-md shrink-0 whitespace-nowrap select-none">
+          {/* Pollutant Selector */}
+          <PollutantSelector
+            selected={selectedPollutant}
+            onChange={(p) => setSelectedPollutant(p)}
+          />
+
+          {/* Satellite / Ingest Status Box */}
+          <div className="hidden lg:flex items-center gap-2 h-10 px-3 bg-[#141721]/95 border border-[#2e3547] rounded-md text-xs shadow-xl backdrop-blur-md shrink-0 whitespace-nowrap select-none">
             <span className="w-2 h-2 rounded-full bg-blue-500 animate-pulse shrink-0" />
             <span className="font-mono text-zinc-300 text-xs whitespace-nowrap">
-              TROPOMI NO₂ L3 / ERA5 Ingest
+              {POLLUTANT_DEFS.find((d) => d.key === selectedPollutant)?.formula || 'NO₂'} L3 / ERA5 Ingest
             </span>
           </div>
 
@@ -308,7 +323,25 @@ export default function HomePage() {
           timeOffsetHours={timeOffsetHours}
           mapTypeId={mapTypeId}
           selectedDate={datesReady ? selectedDate || undefined : ''}
+          selectedPollutant={selectedPollutant}
+          onSelectSource={(source) => setActiveSource(source)}
         />
+
+        {/* Floating Emission Source Assessment Popup */}
+        {activeSource && (
+          <SourcePopup
+            sourceId={activeSource.id || null}
+            sourceName={activeSource.name}
+            sourceCategory={activeSource.category}
+            sourceLat={activeSource.coordinates[0]}
+            sourceLon={activeSource.coordinates[1]}
+            emissionFactor={activeSource.emissionFactor}
+            sourceDetails={activeSource.details}
+            selectedPollutant={selectedPollutant}
+            selectedDate={selectedDate || '2025-11-05'}
+            onClose={() => setActiveSource(null)}
+          />
+        )}
 
         {/* Slide-in Trend & Attribution Panel */}
         {trendData && (

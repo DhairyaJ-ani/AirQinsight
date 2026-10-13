@@ -122,8 +122,28 @@ backend/
 
 ---
 
+---
+
+## Multi-Pollutant GeoTIFF Datasets & Historical Endpoints
+
+The backend bundles 61 daily georeferenced GeoTIFFs (1 November – 31 December 2025) across all 6 tracked pollutants for the Mumbai study area:
+- **NO₂**: Sentinel-5P TROPOMI tropospheric column composites (µmol/m²), 0.035° resolution.
+- **PM₂.₅, PM₁₀, SO₂, O₃, CO**: CAMS European/Global atmospheric analysis (µg/m³ surface concentration), resampled to the 0.035° domain with NaN-preserved cloud/missing masks.
+
+Available endpoints:
+- `GET /api/v1/historical/datasets`: List all bundled datasets with full CRS, grid, and resolution metadata.
+- `GET /api/v1/historical/pollutants/availability`: Multi-pollutant capability and raster readiness matrix.
+- `GET /api/v1/historical/coverage?dataset_id=...`: Temporal coverage audit and valid pixel statistics.
+- `GET /api/v1/historical/manifest?dataset_id=...`: Machine-readable CSV/JSON raster manifest.
+- `GET /api/v1/historical/grid?dataset_id=...&date=...`: Row-major JSON numerical grid with NaN-preservation.
+- `GET /api/v1/historical/geotiff?dataset_id=...&date=...`: Direct Cloud-Optimized / LZW GeoTIFF byte streaming.
+- `GET /api/v1/downscale/dates?pollutant=...`: Available observation timestamps for any pollutant.
+- `GET /api/v1/downscale/geotiff?timestamp=...&pollutant=...`: Downscaled GeoTIFF raster for any pollutant.
+
+---
+
 ## Notes
 
-- ML inference endpoints return **realistic stub data** with `# TODO: integrate ML engine` comments — replace with actual model calls when the ML engine is ready.
 - CORS is configured to allow all origins (`*`) for development. Restrict `allow_origins` in production.
 - Activity logging (`user_activity_logs`) is fault-tolerant — a logging failure will never break a user request.
+

@@ -9,6 +9,13 @@ Every specialist:
 
 These nodes are designed to be composed inside the LangGraph workflow; they never
 duplicate the underlying analysis — they only *interpret* it.
+
+Pollutant-awareness
+-------------------
+All specialists read ``state["pollutant"]`` and look up thresholds from
+``ml_engine.pollutant_registry`` rather than hardcoding NO₂ values.
+The compliance_agent additionally checks ``measurement_type`` to prevent
+satellite column data from being compared against surface NAAQS thresholds.
 """
 
 from __future__ import annotations
@@ -31,21 +38,51 @@ from app.agent.state import (
 
 log = logging.getLogger("agent.specialists")
 
-# ── CPCB / WHO thresholds (mirror analysis.py) ───────────────────────────────
-NAAQS_24H = 80.0   # µg/m³
-WHO_24H = 25.0      # µg/m³
+
+# ── Pollutant-registry helpers ────────────────────────────────────────────────
+
+def _get_naaqs_24h(pollutant: str) -> float | None:
+    """Return the CPCB NAAQS 24-hour threshold (µg/m³) for a pollutant, or None."""
+    try:
+        from ml_engine.pollutant_config import get_pollutant
+        return get_pollutant(pollutant).naaqs_24h
+    except Exception:
+        return None
+
+
+def _get_who_24h(pollutant: str) -> float | None:
+    """Return the WHO 24-hour guideline (µg/m³) for a pollutant, or None."""
+    from ml_engine.compliance import WHO_24H
+    return WHO_24H.get(pollutant.lower())
+
+
+def _get_model_capability(pollutant: str) -> str:
+    """Return the best model capability for a pollutant from the registry."""
+    try:
+        from ml_engine.pollutant_registry import get_registry_entry
+        return get_registry_entry(pollutant).best_model_capability()
+    except Exception:
+        return "unsupported"
+
+
+# ── Legacy constants — kept for backward compat with existing tests ────────────
+# These are NO₂ values.  New code should use _get_naaqs_24h() / _get_who_24h().
+NAAQS_24H = 80.0   # µg/m³ NO₂
+WHO_24H = 25.0      # µg/m³ NO₂
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. ANALYSIS AGENT
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _severity_label(mean: float) -> str:
-    if mean > 180:
+def _severity_label(mean: float, naaqs_24h: float | None = None) -> str:
+    """Severity relative to NAAQS 24-h threshold. Uses NO2 defaults if threshold not given."""
+    threshold = naaqs_24h if naaqs_24h is not None else NAAQS_24H
+    if mean > threshold * 2.25:
         return "hazardous"
-    if mean > NAAQS_24H:
+    if mean > threshold:
         return "critical"
-    if mean > 40:
+    if mean > threshold * 0.5:
         return "elevated"
     return "normal"
 
@@ -89,6 +126,11 @@ async def analysis_agent(state: AgentState) -> AgentState:
     raw = tool_results.get("analysis", tool_results.get("report", {}))
     data = raw.get("data", {}) if isinstance(raw, dict) else {}
 
+    # Resolve per-pollutant thresholds
+    pollutant = state.get("pollutant", "no2")
+    naaqs_24h = _get_naaqs_24h(pollutant)
+    measurement_type = state.get("measurement_type", "surface_concentration")
+
     if not data or raw.get("status") != "success":
         return {
             **state,
@@ -103,8 +145,10 @@ async def analysis_agent(state: AgentState) -> AgentState:
     hotspots = data.get("hotspots", [])
     anomalies = data.get("anomalies", [])
     population = data.get("population", {})
-    mean_no2 = current.get("mean", 0)
-    severity = _severity_label(mean_no2)
+    mean_val = current.get("mean", 0)
+    severity = _severity_label(mean_val, naaqs_24h=naaqs_24h)
+    display_name = pollutant.upper()
+    units = state.get("pollutant_units", "µg/m³")
 
     # Build explanations
     explanations = [_explain_anomaly(a) for a in anomalies]
@@ -114,7 +158,7 @@ async def analysis_agent(state: AgentState) -> AgentState:
         source_text = ", ".join(sources) if sources else "background"
         hotspot_explanations.append(
             f"Hotspot #{h.get('rank', '?')} near **{h.get('near', '?')}**: "
-            f"{h.get('value', 0):.0f} µg/m³ ({h.get('band', 'unknown')} band). Sources: {source_text}."
+            f"{h.get('value', 0):.0f} {units} ({h.get('band', 'unknown')} band). Sources: {source_text}."
         )
 
     total_area = sum(a.get("area_km2", 0) for a in anomalies)
@@ -123,11 +167,19 @@ async def analysis_agent(state: AgentState) -> AgentState:
     if population:
         pop_exposed = population.get("above_naaqs")
 
+    # Note if measurement is column type — cannot compare to surface NAAQS
+    mtype_note = ""
+    if measurement_type == "satellite_column":
+        mtype_note = (
+            f"\n\n⚠️ **Note:** Values are {measurement_type} data ({units}), "
+            "NOT surface concentration. Direct NAAQS comparison is not valid."
+        )
+
     summary_parts = [
-        f"Area mean NO₂ is **{mean_no2:.1f} µg/m³** ({severity.upper()}).",
+        f"Area mean {display_name} is **{mean_val:.1f} {units}** ({severity.upper()}).{mtype_note}",
     ]
     pct = current.get("pct_vs_naaqs")
-    if pct is not None:
+    if pct is not None and measurement_type == "surface_concentration":
         direction = "above" if pct > 0 else "below"
         summary_parts.append(f"This is {abs(pct):.0f}% {direction} the CPCB 24-h limit.")
     if anomalies:
@@ -138,7 +190,8 @@ async def analysis_agent(state: AgentState) -> AgentState:
         summary_parts.append("**Anomaly details:**\n" + "\n".join(f"• {e}" for e in explanations))
 
     evidence = [
-        f"analysis_agent: mean={mean_no2:.1f}, severity={severity}",
+        f"analysis_agent: pollutant={pollutant}, mean={mean_val:.1f} {units}, severity={severity}",
+        f"analysis_agent: measurement_type={measurement_type}",
         f"analysis_agent: {len(anomalies)} anomalies, {len(hotspots)} hotspots",
         f"analysis_agent: sources={all_sources}",
     ]
@@ -282,13 +335,38 @@ async def forecast_agent(state: AgentState) -> AgentState:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def compliance_agent(state: AgentState) -> AgentState:
-    """Classify the situation against CPCB & WHO guidelines and recommend actions."""
+    """Classify the situation against CPCB & WHO guidelines and recommend actions.
+
+    CRITICAL: This agent checks that the input measurement_type is
+    'surface_concentration' before comparing values to NAAQS thresholds.
+    Satellite column data cannot be compared to surface standards.
+    """
     analysis = state.get("analysis_result") or {}
     forecast = state.get("forecast_result") or {}
+    pollutant = state.get("pollutant", "no2")
+    measurement_type = state.get("measurement_type", "surface_concentration")
+
+    # Resolve pollutant-specific thresholds
+    pol_naaqs_24h = _get_naaqs_24h(pollutant)
+    pol_who_24h = _get_who_24h(pollutant)
+    model_cap = _get_model_capability(pollutant)
+
+    # Block satellite column from NAAQS comparison
+    measurement_type_warning: str | None = None
+    if measurement_type == "satellite_column":
+        measurement_type_warning = (
+            f"CRITICAL: Input data is {measurement_type} — atmospheric column data (µmol/m²). "
+            "This CANNOT be directly compared to CPCB NAAQS surface concentration thresholds. "
+            "A surface-level downscaling or ground-station measurement is required for compliance assessment. "
+            "Results below are indicative only and do NOT constitute a compliance determination."
+        )
+        log.warning(
+            "compliance_agent: satellite_column data passed for pollutant=%s — "
+            "compliance comparison is not scientifically valid", pollutant
+        )
 
     severity = analysis.get("severity", "normal")
     anomalies = analysis.get("anomalies", [])
-    hotspots = analysis.get("hotspots", [])
     alerts = forecast.get("alerts", [])
     trend = forecast.get("trend_direction", "unknown")
     wind_speed = forecast.get("wind_speed")
@@ -299,7 +377,10 @@ async def compliance_agent(state: AgentState) -> AgentState:
     persisting = any(a.get("code") == "persisting" for a in alerts)
     expected = any(a.get("code") == "exceedance_expected" for a in alerts)
 
-    if severity == "hazardous" or (has_exceedance and persisting):
+    # Downgrade to advisory if data is column type (not surface)
+    if measurement_type == "satellite_column":
+        classification = "advisory"  # Cannot classify as investigation/hazardous without surface data
+    elif severity == "hazardous" or (has_exceedance and persisting):
         classification = "hazardous"
     elif has_exceedance or has_spike or expected:
         classification = "investigation"
@@ -307,28 +388,37 @@ async def compliance_agent(state: AgentState) -> AgentState:
         classification = "advisory"
 
     # CPCB / WHO status strings
-    cpcb_status = "EXCEEDED" if has_exceedance else ("AT RISK" if expected else "WITHIN LIMITS")
-    who_status = "EXCEEDED" if severity in ("elevated", "critical", "hazardous") else "WITHIN LIMITS"
+    if measurement_type == "satellite_column":
+        cpcb_status = "CANNOT_ASSESS (column data)"
+        who_status = "CANNOT_ASSESS (column data)"
+    else:
+        cpcb_status = "EXCEEDED" if has_exceedance else ("AT RISK" if expected else "WITHIN LIMITS")
+        who_status = "EXCEEDED" if severity in ("elevated", "critical", "hazardous") else "WITHIN LIMITS"
 
     # Exceedance percentage from analysis data
     tool_results = state.get("tool_results", {})
     ar = tool_results.get("analysis", tool_results.get("report", {}))
     current = ar.get("data", {}).get("current", {}) if isinstance(ar, dict) else {}
-    exceedance_pct = current.get("pct_vs_naaqs")
+    exceedance_pct = current.get("pct_vs_naaqs") if measurement_type == "surface_concentration" else None
 
     # Recommended actions
     actions = []
-    if classification == "hazardous":
+    if measurement_type == "satellite_column":
+        actions.append(
+            "📡 Surface concentration measurement (ground station or downscaled raster) "
+            "required before issuing any compliance determination."
+        )
+    elif classification == "hazardous":
         actions.extend([
             "🚨 Issue public health advisory for the affected area immediately.",
-            "📋 Notify CPCB/SPCB regional office of sustained exceedance.",
+            f"📋 Notify CPCB/SPCB regional office of sustained {pollutant.upper()} exceedance.",
             "🚫 Consider temporary emission restrictions (construction, traffic diversions).",
             "🏥 Alert healthcare facilities for increased respiratory cases.",
         ])
     elif classification == "investigation":
         actions.extend([
             "🔍 Dispatch field inspection team to identified hotspot(s).",
-            "📊 Cross-reference with industrial emission permits in the area.",
+            f"📊 Cross-reference with industrial emission permits in the area ({pollutant.upper()} sources).",
         ])
         if has_spike:
             actions.append("⚡ Investigate unlisted emission sources — spike detected against baseline.")
@@ -339,20 +429,37 @@ async def compliance_agent(state: AgentState) -> AgentState:
         if trend == "rising":
             actions.append("📈 Trend is rising — increase monitoring frequency.")
 
+    # Model capability warning
+    if model_cap == "unsupported":
+        actions.append(
+            f"⚠️ No validated model is available for {pollutant.upper()}. "
+            "Predictions shown are not scientifically validated."
+        )
+    elif model_cap == "experimental":
+        actions.append(
+            f"🔬 {pollutant.upper()} model is experimental. Results should be treated as indicative only."
+        )
+
     # Regulatory summary
+    naaqs_str = f"{pol_naaqs_24h:.0f} µg/m³" if pol_naaqs_24h is not None else "no 24-h standard"
+    who_str = f"{pol_who_24h:.0f} µg/m³" if pol_who_24h is not None else "no 24-h guideline"
     summary_parts = [
-        f"**Classification: {classification.upper()}**",
-        f"CPCB NAAQS 24-h ({NAAQS_24H:.0f} µg/m³): **{cpcb_status}**",
-        f"WHO 24-h ({WHO_24H:.0f} µg/m³): **{who_status}**",
+        f"**Classification: {classification.upper()}** ({pollutant.upper()})",
+        f"CPCB NAAQS 24-h ({naaqs_str}): **{cpcb_status}**",
+        f"WHO 24-h ({who_str}): **{who_status}**",
     ]
+    if measurement_type_warning:
+        summary_parts.insert(0, f"⚠️ {measurement_type_warning}")
     if exceedance_pct is not None:
         summary_parts.append(
             f"Current level is {abs(exceedance_pct):.0f}% {'above' if exceedance_pct > 0 else 'below'} CPCB limit."
         )
 
     evidence = [
-        f"compliance_agent: classification={classification}",
+        f"compliance_agent: pollutant={pollutant}, classification={classification}",
+        f"compliance_agent: measurement_type={measurement_type}",
         f"compliance_agent: cpcb={cpcb_status}, who={who_status}",
+        f"compliance_agent: model_capability={model_cap}",
         f"compliance_agent: exceedance_anomalies={len([a for a in anomalies if 'exceedance' in a.get('kinds', [])])}",
         f"compliance_agent: forecast_trend={trend}",
     ]
@@ -367,6 +474,9 @@ async def compliance_agent(state: AgentState) -> AgentState:
             recommended_actions=actions,
             regulatory_summary="\n".join(summary_parts),
             evidence=evidence,
+            measurement_type_warning=measurement_type_warning,
+            averaging_period="24h",
+            standard_name="India NAAQS 2009",
         ),
     }
 
@@ -634,6 +744,7 @@ async def xai_agent(state: AgentState) -> AgentState:
     """Uses SHAP explainability service to produce human-readable attribution."""
     from ml_engine.xai import get_shap_service
 
+    pollutant = (state.get("pollutant") or "no2").lower()
     tool_results = state.get("tool_results", {})
     cur = {}
     for source in ("analysis", "report", "downscale"):
@@ -654,7 +765,17 @@ async def xai_agent(state: AgentState) -> AgentState:
     feature_values = [0.82, 2.1, 0.68, 380.0, 0.45, 0.74, 28.5, 35.0]
 
     service = get_shap_service()
-    service.set_model(None, feature_names)  # Heuristic fallback uses verified domain weights
+    model_name = f"Heuristic Feature Attribution ({pollutant.upper()})"
+    try:
+        from ml_engine.registry import ModelRegistry
+        registry = ModelRegistry()
+        booster, meta, _ = registry.load_lightgbm(pollutant)
+        service.set_model(booster, meta.get("features", feature_names))
+        model_name = f"LightGBM ({pollutant.upper()})"
+    except Exception as exc:
+        log.info("xai_agent: Using verified domain feature attribution for %s: %s", pollutant, exc)
+        service.set_model(None, feature_names)
+
     xai_pack = service.explain_instance(
         features=feature_values,
         predicted_val=mean_val,
@@ -662,6 +783,8 @@ async def xai_agent(state: AgentState) -> AgentState:
     )
 
     evidence = [
+        f"xai_agent: pollutant={pollutant}",
+        f"xai_agent: model_used={model_name}",
         f"xai_agent: top_driver={xai_pack.top_contributors[0]['feature_label']}",
         f"xai_agent: top_share={xai_pack.top_contributors[0]['percentage']:.0f}%",
         f"xai_agent: base_value={xai_pack.base_value:.1f} ug/m3",
@@ -679,6 +802,8 @@ async def xai_agent(state: AgentState) -> AgentState:
             predicted_value=xai_pack.predicted_value,
             confidence=xai_pack.confidence,
             evidence=evidence,
+            pollutant=pollutant,
+            model_used=model_name,
         ),
     }
 

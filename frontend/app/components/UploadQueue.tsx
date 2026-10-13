@@ -109,10 +109,18 @@ export default function UploadQueue({
                   <div className="text-xs font-semibold text-zinc-200 truncate max-w-md">
                     {file.name}
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] text-zinc-400 mt-0.5">
+                    <div className="flex items-center gap-2 text-[11px] text-zinc-400 mt-0.5">
                     <span>{formatFileSize(file.sizeBytes)}</span>
                     <span>•</span>
                     <span className="font-mono uppercase">{file.type || 'RASTER'}</span>
+                    {file.stats?.pollutantName && (
+                      <>
+                        <span>•</span>
+                        <span className="px-1.5 py-0.2 rounded bg-blue-500/10 text-blue-300 font-mono text-[10px] border border-blue-500/20">
+                          {file.stats.pollutantName} ({file.stats.units || 'µg/m³'})
+                        </span>
+                      </>
+                    )}
                     {file.stats && (
                       <>
                         <span>•</span>
@@ -217,10 +225,11 @@ function InspectionModal({ file, formatFileSize, onClose }: InspectionModalProps
         if (file._file) {
           arrayBuffer = await file._file.arrayBuffer();
         } else {
-          // Extract specific observation date from the file name (e.g. 2025-11-19, 2025-11-21)
+          // Extract specific observation date and pollutant from the file name
           const dateMatch = file.name.match(/(\d{4}-\d{2}-\d{2})/);
           const targetDate = dateMatch ? dateMatch[1] : '2025-11-05';
-          const res = await fetch(`http://localhost:8000/api/v1/downscale/geotiff?timestamp=${targetDate}T00:00:00Z`);
+          const pol = file.stats?.pollutant || 'no2';
+          const res = await fetch(`http://localhost:8000/api/v1/downscale/geotiff?timestamp=${targetDate}T00:00:00Z&pollutant=${encodeURIComponent(pol)}`);
           if (res.ok) {
             arrayBuffer = await res.arrayBuffer();
           }
@@ -595,7 +604,7 @@ function InspectionModal({ file, formatFileSize, onClose }: InspectionModalProps
                 Validation RMSE
               </div>
               <div className="text-base font-bold font-mono text-zinc-100 mt-0.5">
-                {rmse.toFixed(1)} µg/m³
+                {rmse.toFixed(1)} {file.stats?.units || 'µg/m³'}
               </div>
               <div className="text-[10px] text-zinc-400">Against CPCB Ground Truth</div>
             </div>

@@ -3,6 +3,10 @@
 Extended for the multi-agent environmental intelligence system: each specialist writes
 its findings into dedicated state slots, and the mission controller reads them all to
 produce a unified response with explainability evidence.
+
+Pollutant identity (``pollutant``, ``measurement_type``, ``data_source``,
+``model_capability``, ``pollutant_units``) is propagated through every node so that
+no specialist can silently fall back to NO₂ when a different pollutant is selected.
 """
 
 from __future__ import annotations
@@ -33,6 +37,8 @@ class ForecastResult(TypedDict, total=False):
     movement_summary: str                     # concise plume movement narrative
     trend_direction: Literal["rising", "falling", "stable", "unknown"]
     evidence: list[str]
+    model_capability: str                     # "production" | "experimental" | "unsupported"
+    pollutant: str
 
 
 class ComplianceResult(TypedDict, total=False):
@@ -44,6 +50,9 @@ class ComplianceResult(TypedDict, total=False):
     recommended_actions: list[str]
     regulatory_summary: str
     evidence: list[str]
+    measurement_type_warning: str | None      # set when column data bypasses surface check
+    averaging_period: str
+    standard_name: str
 
 
 class DroneResult(TypedDict, total=False):
@@ -57,6 +66,8 @@ class DroneResult(TypedDict, total=False):
     weather_ok: bool
     decision_reason: str
     evidence: list[str]
+    pollutant: str
+    sensor_supported: bool                    # whether the drone can measure this pollutant
 
 
 class ReportResult(TypedDict, total=False):
@@ -67,6 +78,11 @@ class ReportResult(TypedDict, total=False):
     language: str
     summary: str
     evidence: list[str]
+    pollutant: str
+    measurement_type: str
+    data_sources: list[str]
+    model_version: str | None
+    limitations: list[str]
 
 
 class XAIResult(TypedDict, total=False):
@@ -80,6 +96,8 @@ class XAIResult(TypedDict, total=False):
     predicted_value: float
     confidence: float
     evidence: list[str]
+    pollutant: str
+    model_used: str
 
 
 class SimulatorResult(TypedDict, total=False):
@@ -109,6 +127,8 @@ class EnsembleConfidenceResult(TypedDict, total=False):
     model_agreement: str                      # "High Agreement across XGBoost, RF, LightGBM"
     model_weights: dict[str, float]           # {"xgboost": 0.5, "random_forest": 0.3, "lightgbm": 0.2}
     evidence: list[str]
+    pollutant: str
+    model_capability: str                     # from pollutant registry
 
 
 class MissionBrief(TypedDict, total=False):
@@ -121,6 +141,10 @@ class MissionBrief(TypedDict, total=False):
     recommended_actions: list[str]            # what humans should do next
     evidence_chain: list[str]                 # full explainability trail
     artifacts: list[dict[str, Any]]
+    pollutant: str
+    measurement_type: str
+    data_source: str
+    limitations: list[str]
 
 
 # ── Main agent state ──────────────────────────────────────────────────────────
@@ -130,6 +154,17 @@ class AgentState(TypedDict, total=False):
 
     Fields marked ``total=False`` are optional: the graph starts with only ``user_query``
     and gradually fills the rest.
+
+    Pollutant identity fields
+    -------------------------
+    ``pollutant``         : key from POLLUTANT_REGISTRY (e.g. "no2", "pm25")
+    ``measurement_type``  : "satellite_column" | "surface_concentration" | "ground_station" | etc.
+    ``data_source``       : human-readable data source description
+    ``model_capability``  : "production" | "validated_cv" | "experimental" | "unsupported"
+    ``pollutant_units``   : native units of the input data (e.g. "µmol/m²", "µg/m³")
+
+    These are set by parse_intent / execute_tools and must be preserved through every
+    node. The mission controller validates they are present before passing to specialists.
     """
 
     # ── Input ──────────────────────────────────────────────────────────────
@@ -147,6 +182,14 @@ class AgentState(TypedDict, total=False):
     requested_tasks: list[str]            # e.g. ["downscale", "forecast", "report"]
     additional_notes: str
     language: Literal["en", "hi", "mr"]
+
+    # ── Pollutant identity (must propagate through all nodes) ───────────────
+    pollutant: str                        # e.g. "no2", "pm25", "so2" — from POLLUTANT_REGISTRY
+    measurement_type: str                 # "satellite_column" | "surface_concentration" | etc.
+    data_source: str                      # human-readable source description
+    model_capability: str                 # "production" | "validated_cv" | "experimental" | "unsupported"
+    pollutant_units: str                  # native input units (e.g. "µmol/m²", "µg/m³")
+    dataset_id: str | None               # bundled dataset identifier if applicable
 
     # ── Routing ────────────────────────────────────────────────────────────
     intent: str                           # parsed intent name

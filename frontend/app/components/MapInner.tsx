@@ -35,6 +35,10 @@ interface MapInnerProps {
   mapTypeId?: 'roadmap' | 'satellite' | 'hybrid' | 'terrain';
   /** Uploaded day to show (from /downscale/dates), as on the Plume Flow page. */
   selectedDate?: string;
+  /** Active pollutant key for the heatmap layer (default: 'no2') */
+  selectedPollutant?: string;
+  /** Callback when user clicks an emission source marker */
+  onSelectSource?: (poi: POISource) => void;
 }
 
 // Synthetic coarse 7km raw satellite footprint
@@ -70,6 +74,8 @@ export default function MapInner({
   timeOffsetHours = 0,
   mapTypeId = 'roadmap',
   selectedDate,
+  selectedPollutant = 'no2',
+  onSelectSource,
 }: MapInnerProps) {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const [mapInstance, setMapInstance] = useState<any>(null);
@@ -86,8 +92,8 @@ export default function MapInner({
   const selectedMarkerRef = useRef<any>(null);
   const selectedPulseCircleRef = useRef<any>(null);
 
-  // Load NO2 GeoTIFF data for smooth heatmap
-  const { data: geoTiffData } = useHomeGeoTiffLoader(selectedDate);
+  // Load pollutant GeoTIFF data for smooth heatmap
+  const { data: geoTiffData } = useHomeGeoTiffLoader(selectedDate, selectedPollutant);
 
   // Keep callback fresh in ref
   const onMapClickRef = useRef(onMapClick);
@@ -357,11 +363,12 @@ export default function MapInner({
 
     if (activeLayers.downscaled && geoTiffData) {
       const overlay = createNO2HeatmapOverlay({
-        no2: geoTiffData.no2,
+        values: geoTiffData.values ?? geoTiffData.no2,
         width: geoTiffData.width,
         height: geoTiffData.height,
         bbox: geoTiffData.bbox,
         opacity: 0.75,
+        pollutant: selectedPollutant,
       });
 
       overlay.setMap(map);
@@ -374,7 +381,7 @@ export default function MapInner({
         heatmapOverlayRef.current = null;
       }
     };
-  }, [activeLayers.downscaled, geoTiffData, mapInstance]);
+  }, [activeLayers.downscaled, geoTiffData, mapInstance, selectedPollutant]);
 
   // 6. Render LAYER 3: Wind Vector Advection Arrows
   useEffect(() => {
@@ -471,6 +478,9 @@ export default function MapInner({
       });
 
       marker.addListener('click', () => {
+        if (onSelectSource) {
+          onSelectSource(poi);
+        }
         if (infoWindowRef.current) {
           const content = `
             <div style="font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; font-size: 11px; max-width: 250px; padding: 6px 8px; background: #0c0f17; color: #e2e8f0; border: 1px solid #1e2638; border-radius: 6px;">
@@ -485,7 +495,7 @@ export default function MapInner({
               </p>
               <div style="display: flex; align-items: center; justify-content: space-between; font-size: 9px; font-family: ui-monospace, monospace; color: #94a3b8; padding-top: 4px; border-top: 1px solid #1e2638;">
                 <span>Emission Factor: ${(poi.emissionFactor * 100).toFixed(0)}%</span>
-                <span style="color: #60a5fa;">PostGIS Spatial Point</span>
+                <span style="color: #60a5fa;">Click for AI Source Assessment</span>
               </div>
             </div>
           `;

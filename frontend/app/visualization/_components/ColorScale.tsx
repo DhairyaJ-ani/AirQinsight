@@ -11,13 +11,28 @@ const COLOR_STOPS = [
   { value: 0, label: 'Good', color: '#00e400' },
 ];
 
-export default function ColorScale() {
+interface ColorScaleProps {
+  pollutant?: string;
+  units?: string;
+  measurementType?: string;
+}
+
+export default function ColorScale({
+  pollutant = 'no2',
+  units = 'µmol/m²',
+  measurementType = 'satellite_column',
+}: ColorScaleProps) {
+  const isColumn = measurementType === 'satellite_column';
+  const labelTitle = isColumn
+    ? `${pollutant.toUpperCase()} Tropospheric Column`
+    : `${pollutant.toUpperCase()} Concentration`;
+
   return (
-    <div className="absolute bottom-20 right-4 z-20 bg-[#11141d]/95 backdrop-blur-md border border-[#242938] rounded-xl p-3 shadow-2xl text-[#f1f3f7] select-none w-52">
+    <div className="absolute bottom-20 right-4 z-20 bg-[#11141d]/95 backdrop-blur-md border border-[#242938] rounded-xl p-3 shadow-2xl text-[#f1f3f7] select-none w-56">
       {/* Title */}
       <div className="text-[11px] font-semibold text-white tracking-wide uppercase font-mono mb-2 flex items-center justify-between border-b border-[#242938] pb-1.5">
-        <span>NO₂ Concentration</span>
-        <span className="text-[10px] text-zinc-400 font-normal">µg/m³</span>
+        <span className="truncate">{labelTitle}</span>
+        <span className="text-[10px] text-zinc-400 font-normal shrink-0 ml-1">{units}</span>
       </div>
 
       <div className="flex items-center gap-3">
@@ -43,7 +58,7 @@ export default function ColorScale() {
 
       {/* Advisory footnote */}
       <div className="mt-2 pt-1.5 border-t border-[#242938] text-[9px] text-zinc-400 text-center font-mono">
-        WHO / CPCB Regulatory AQI Scale
+        {isColumn ? 'Satellite TROPOMI Column Density' : 'WHO / CPCB Regulatory Scale'}
       </div>
     </div>
   );

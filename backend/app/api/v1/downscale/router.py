@@ -21,18 +21,29 @@ router = APIRouter()
     tags=["downscale"],
 )
 async def get_available_dates(
+    pollutant: Optional[str] = Query(None, description="Optional pollutant key (e.g. no2, pm25, pm10, so2, o3, co)"),
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """
-    Return all available dates from test_data GeoTIFFs (backend/data/test_data).
+    Return available dates from test_data GeoTIFFs (for NO2) or pollutant_samples (for other pollutants).
     """
-    test_data_dir = Path("data/test_data")
-    if not test_data_dir.exists():
-        test_data_dir = Path("backend/data/test_data")
+    pol_key = (pollutant or "no2").lower()
+
+    if pol_key in ("pm25", "pm10", "so2", "o3", "co"):
+        folder_map = {"pm25": "PM25", "pm10": "PM10", "so2": "SO2", "o3": "O3", "co": "CO"}
+        pol_folder = folder_map[pol_key]
+        candidates = [
+            Path(f"data/pollutant_samples/{pol_folder}"),
+            Path(f"backend/data/pollutant_samples/{pol_folder}"),
+        ]
+        target_dir = next((c for c in candidates if c.exists()), None)
+    else:
+        candidates = [Path("data/test_data"), Path("backend/data/test_data")]
+        target_dir = next((c for c in candidates if c.exists()), None)
 
     dates = []
-    if test_data_dir.exists():
-        for file in sorted(test_data_dir.glob("*.tif")):
+    if target_dir and target_dir.exists():
+        for file in sorted(target_dir.glob("*.tif")):
             match = re.search(r"(\d{4}-\d{2}-\d{2})", file.name)
             if match:
                 dates.append(match.group(1))
@@ -41,9 +52,11 @@ async def get_available_dates(
     return {
         "dates": dates,
         "count": len(dates),
-        "source": "backend/data/test_data",
+        "pollutant": pol_key,
+        "source": str(target_dir) if target_dir else "none",
         "default_date": dates[0] if dates else "2025-11-05",
     }
+
 
 
 @router.get(
@@ -170,23 +183,35 @@ async def get_map(
 )
 async def geotiff(
     timestamp: Optional[str] = Query(None, description="Timestamp for plume animation raster (e.g. 2025-11-05T12:00:00Z)"),
+    pollutant: Optional[str] = Query(None, description="Optional pollutant key (e.g. no2, pm25, pm10, so2, o3, co)"),
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Serves a multi-band GeoTIFF with NO2, wind U, and wind V interpolated from test_data across the diurnal
-    cycle for the Plume Flow visualization (requires ``timestamp``).
+    Serves a multi-band GeoTIFF with pollutant concentration/column, wind U, and wind V interpolated
+    across the diurnal cycle for the Plume Flow visualization (requires ``timestamp``).
     """
     # Plume Flow animation mode
     if timestamp:
         date_match = re.search(r"(\d{4}-\d{2}-\d{2})", timestamp)
         target_date = date_match.group(1) if date_match else "2025-11-05"
+        pol_key = (pollutant or "no2").lower()
 
-        test_data_dir = Path("data/test_data")
-        if not test_data_dir.exists():
-            test_data_dir = Path("backend/data/test_data")
+        folder_map = {"pm25": "PM25", "pm10": "PM10", "so2": "SO2", "o3": "O3", "co": "CO"}
+        if pol_key in folder_map:
+            pol_folder = folder_map[pol_key]
+            candidates = [
+                Path(f"data/pollutant_samples/{pol_folder}"),
+                Path(f"backend/data/pollutant_samples/{pol_folder}"),
+            ]
+            test_data_dir = next((c for c in candidates if c.exists()), Path(f"data/pollutant_samples/{pol_folder}"))
+            file_prefix = f"{pol_folder}_"
+        else:
+            candidates = [Path("data/test_data"), Path("backend/data/test_data")]
+            test_data_dir = next((c for c in candidates if c.exists()), Path("data/test_data"))
+            file_prefix = "no2_raw_coarse_"
 
         def _read_date_raster(date_str: str) -> tuple[np.ndarray, dict]:
-            fpath = test_data_dir / f"no2_raw_coarse_{date_str}.tif"
+            fpath = test_data_dir / f"{file_prefix}{date_str}.tif"
             if not fpath.exists():
                 all_tifs = sorted(test_data_dir.glob("*.tif"))
                 if all_tifs:
@@ -243,10 +268,14 @@ async def geotiff(
             dst.write(v_wind, 3)
 
         buf.seek(0)
+        out_filename = f"{file_prefix}{target_date}.tif"
         return Response(
             content=buf.getvalue(),
             media_type="image/tiff",
-            headers={"Content-Disposition": f"inline; filename=no2_raw_coarse_{target_date}.tif"},
+            headers={
+                "Content-Disposition": f"inline; filename={out_filename}",
+                "X-Pollutant": pol_key,
+            },
         )
 
     raise HTTPException(status_code=404, detail="timestamp is required")

@@ -11,6 +11,7 @@ from app.api.v1.drone.router import router as drone_router
 from app.agent.api import router as agent_router
 from app.api.v1.pollutants.router import router as pollutants_router
 from app.api.v1.simulator.router import router as simulator_router
+from app.api.v1.historical.router import router as historical_router
 
 v1_router = APIRouter()
 
@@ -25,3 +26,4 @@ v1_router.include_router(drone_router)
 v1_router.include_router(agent_router, prefix="/agent")
 v1_router.include_router(simulator_router, prefix="/simulator")
 v1_router.include_router(pollutants_router, prefix="/pollutants")
+v1_router.include_router(historical_router, prefix="/historical")
