@@ -275,6 +275,10 @@ export default function VisualizationMap() {
       setUnsupportedModalOpen(true);
       return;
     }
+    // Clear stale raster immediately so the old pollutant's heatmap
+    // doesn't persist while the new dataset loads.
+    setCurrentNo2(null);
+    setCurrentBbox(DEFAULT_BBOX);
     setSelectedPollutant(pol.key);
     if (pol.key === 'no2') {
       setDatasetId('no2_61day_2025');
@@ -455,7 +459,13 @@ export default function VisualizationMap() {
           pollutantName={activePolDef.formula}
           units={activePolDef.units}
           measurementType={activePolDef.measurementType}
-          datasetName={datasetId === 'no2_61day_2025' ? '61-Day Sentinel-5P' : '8-Day Samples'}
+          datasetName={
+            datasetId === 'no2_61day_2025'
+              ? '61-Day Sentinel-5P (NO₂)'
+              : datasetId === 'no2_samples_8day'
+              ? '8-Day Samples (NO₂)'
+              : `61-Day CAMS (${activePolDef.formula})`
+          }
         />
       </div>
 

@@ -45,34 +45,49 @@ export default function RegionInfo({
     return `Domain [${bbox[0].toFixed(2)}°, ${bbox[1].toFixed(2)}° to ${bbox[2].toFixed(2)}°, ${bbox[3].toFixed(2)}°]`;
   }, [bbox]);
 
-  // Compute min, max, and mean NO₂ statistics for active advected frame
+  // Compute min, max, and mean statistics for active advected frame.
+  // NoData (NaN) and infinite values are excluded; cloud-masked pixels
+  // must not be treated as zero concentration.
   const stats = useMemo(() => {
     if (!no2 || no2.length === 0) {
-      return { min: 0, max: 0, mean: 0 };
+      return { min: null, max: null, mean: null };
     }
 
     let min = Infinity;
     let max = -Infinity;
     let sum = 0;
-    const len = no2.length;
+    let count = 0;
 
-    for (let i = 0; i < len; i++) {
+    for (let i = 0; i < no2.length; i++) {
       const val = no2[i];
+      if (!isFinite(val) || isNaN(val)) continue; // skip NoData / cloud-masked
       if (val < min) min = val;
       if (val > max) max = val;
       sum += val;
+      count++;
     }
+
+    if (count === 0) return { min: null, max: null, mean: null };
 
     return {
       min: Math.round(min * 10) / 10,
       max: Math.round(max * 10) / 10,
-      mean: Math.round((sum / len) * 10) / 10,
+      mean: Math.round((sum / count) * 10) / 10,
     };
   }, [no2]);
 
   // Determine hazard classification badge based on WHO/CPCB breakpoints
   const hazardBadge = useMemo(() => {
-    const { mean } = stats;
+    const mean = stats.mean;
+    if (mean === null) {
+      return {
+        label: 'Loading data…',
+        textColor: 'text-zinc-400',
+        bgColor: 'bg-zinc-800/60',
+        borderColor: 'border-zinc-600/40',
+        dotColor: 'bg-zinc-500',
+      };
+    }
     const cat = getHazardCategory(mean, pollutant);
     if (cat.category === 'NORMAL') {
       return {
@@ -153,7 +168,7 @@ export default function RegionInfo({
           {hazardBadge.label}
         </span>
         <span className="font-mono text-[11px] font-bold">
-          {stats.mean} <span className="text-[9px] font-normal">{units}</span>
+          {stats.mean !== null ? stats.mean : '–'} <span className="text-[9px] font-normal">{units}</span>
         </span>
       </div>
 
@@ -162,7 +177,7 @@ export default function RegionInfo({
         <div className="bg-[#161a26] border border-[#242938] rounded-lg p-1.5">
           <div className="text-[10px] text-zinc-400 uppercase font-mono">Min {pollutantName}</div>
           <div className="text-xs font-mono font-bold text-emerald-400 mt-0.5">
-            {stats.min}
+            {stats.min !== null ? stats.min : '–'}
           </div>
           <div className="text-[9px] text-zinc-400">{units}</div>
         </div>
@@ -173,7 +188,7 @@ export default function RegionInfo({
             <span>Mean</span>
           </div>
           <div className="text-xs font-mono font-bold text-white mt-0.5">
-            {stats.mean}
+            {stats.mean !== null ? stats.mean : '–'}
           </div>
           <div className="text-[9px] text-zinc-400">{units}</div>
         </div>
@@ -181,7 +196,7 @@ export default function RegionInfo({
         <div className="bg-[#161a26] border border-[#242938] rounded-lg p-1.5">
           <div className="text-[10px] text-zinc-400 uppercase font-mono">Peak {pollutantName}</div>
           <div className="text-xs font-mono font-bold text-rose-400 mt-0.5">
-            {stats.max}
+            {stats.max !== null ? stats.max : '–'}
           </div>
           <div className="text-[9px] text-zinc-400">{units}</div>
         </div>

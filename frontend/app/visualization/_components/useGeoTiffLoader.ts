@@ -88,15 +88,23 @@ export function useGeoTiffLoader(
 
       const dateStr = timestamp.split('T')[0];
       const polKey = (pollutant || 'no2').toLowerCase();
-      // Use historical endpoint for specific dataset or fall back to downscale
+
+      // Dataset-aware URL construction:
+      // – no2_samples_8day → historical test-sample endpoint
+      // – no2 (61-day) → downscale/geotiff (legacy path, still served from test_data)
+      // – all other pollutants → their own CAMS historical dataset endpoint
+      //   (e.g. o3_cams_61day_2025/o3/{date}/geotiff)
       let url: string;
       if (datasetId === 'no2_samples_8day') {
-        url = `${API_BASE}/api/v1/historical/no2_samples_8day/${polKey}/${dateStr}/geotiff`;
+        url = `${API_BASE}/api/v1/historical/no2_samples_8day/no2/${dateStr}/geotiff`;
+      } else if (polKey !== 'no2') {
+        // Route non-NO2 pollutants through their CAMS historical dataset endpoint.
+        // This ensures Plume Flow never silently falls back to a NO2 raster.
+        const camsDatasetId = datasetId.startsWith(`${polKey}_`) ? datasetId : `${polKey}_cams_61day_2025`;
+        url = `${API_BASE}/api/v1/historical/${camsDatasetId}/${polKey}/${dateStr}/geotiff`;
       } else {
+        // NO2 61-day dataset — use the downscale endpoint (served from test_data)
         url = `${API_BASE}/api/v1/downscale/geotiff?timestamp=${encodeURIComponent(timestamp)}`;
-        if (polKey !== 'no2') {
-          url += `&pollutant=${encodeURIComponent(polKey)}`;
-        }
       }
 
       const response = await fetch(url, { headers });

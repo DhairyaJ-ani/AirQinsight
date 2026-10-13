@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AirQ Insight — Frontend Web Application
 
-## Getting Started
+The interactive geospatial web application for **AirQ Insight**, built with Next.js 16 (React 19), Tailwind CSS 4, MapLibre GL, and Three.js.
 
-First, run the development server:
+*Companion Documentation: [Repository README](file:///Users/dhairyapunitjani/Development/My%20bharat%202026/AirQinsight/README.md) · [System Architecture](file:///Users/dhairyapunitjani/Development/My%20bharat%202026/AirQinsight/SYSTEM_ARCHITECTURE.md)*
 
+---
+
+## 🚀 Key Modules & Pages
+
+- **`/` (Geospatial Map):** Interactive national and regional air quality canvas with real-time layer controls and pollutant selection.
+- **`/visualization` (Plume Flow & Point Forecasting):** High-resolution raster inspection, interactive timeline scrubber, dynamic color legends, and coordinate-specific point forecasting.
+- **`/simulator` (What-If Policy Simulator):** Digital twin counterfactual scenario simulator for testing emissions abatement policies (traffic reduction, industrial limits, construction halts).
+- **`/drone` (Drone Flight Planning Portal):** Autonomous mission control generating wind-compensated UAV inspection flight waypoints over detected hotspots.
+- **`/chatbot` (AI Multi-Agent Assistant):** Natural language environmental intelligence interface rendering dynamic **Mission Cards** powered by LangGraph.
+- **`/reports` (Regulatory Compliance Center):** Interactive CPCB NAAQS regulatory compliance dashboard with one-click official PDF report synthesis.
+- **`/globe` (3D Atmospheric Globe):** Three.js-powered WebGL planetary globe for transboundary air quality monitoring.
+- **`/upload` (Raster Ingestion Portal):** Quality control and ingestion portal for user-uploaded GeoTIFF satellite files.
+
+---
+
+## 🛠️ Getting Started
+
+### Prerequisites
+- **Node.js:** `>= 18.18` (Node 20+ LTS recommended)
+- **npm:** `>= 9.0`
+
+### Installation
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+npm install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Environment Configuration
+Copy `.env.example` to `.env.local`:
+```bash
+cp .env.example .env.local
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Configure your environment variables:
+```env
+NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-google-maps-api-key
+NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-key
+```
+*(For local offline evaluation, `NEXT_PUBLIC_GOOGLE_MAPS_API_KEY` is pre-configured with the default key).*
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Running the Development Server
+```bash
+npm run dev
+```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Building for Production
+```bash
+npm run build
+npm run start
+```
+*(Production builds are optimized with Turbopack and pre-render 17 static and dynamic route pages).*

@@ -658,6 +658,8 @@ async def get_geotiff(
         )
 
     content = tif_path.read_bytes()
+    # HTTP response headers must be ASCII-safe; replace Unicode units chars
+    safe_units = ds["units"].replace("µ", "u").replace("²", "2").replace("³", "3")
     return Response(
         content=content,
         media_type="image/tiff",
@@ -667,6 +669,6 @@ async def get_geotiff(
             "X-Dataset": dataset_id,
             "X-Date": date_str,
             "X-Measurement-Type": ds["measurement_type"],
-            "X-Units": ds["units"].replace("µ", "u").replace("²", "2"),
+            "X-Units": safe_units,
         },
     )
