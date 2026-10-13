@@ -54,7 +54,8 @@ export interface WindVector {
 export interface TrendForecastPoint {
   timeOffsetHours: number; // e.g., 0, 3, 6, 12, 24
   label: string;
-  no2Value: number;
+  no2Value: number; // legacy alias
+  value?: number;
   dispersionFactor: number;
   projectedAQI: number;
 }
@@ -62,7 +63,14 @@ export interface TrendForecastPoint {
 export interface PinpointAttributionResult {
   locationName: string;
   coordinates: [number, number];
-  currentNO2: number;
+  currentNO2: number; // legacy alias
+  currentValue?: number;
+  pollutant?: string;
+  pollutantName?: string;
+  units?: string;
+  measurementType?: string;
+  datasetId?: string;
+  observationDate?: string;
   hazardBand: HazardBand;
   forecast: TrendForecastPoint[];
   sources: POISource[];
@@ -73,6 +81,8 @@ export interface PinpointAttributionResult {
   };
   summary: string;
   regulatoryCompliance: 'COMPLIANT' | 'EXCEEDANCE_WARNING' | 'CRITICAL_VIOLATION';
+  attributionAvailable?: boolean;
+  attributionNote?: string;
 }
 
 export type UploadStatus = 'QUEUED' | 'UPLOADING' | 'CLEANING_MODEL' | 'DOWNSCALING' | 'COMPLETED' | 'FAILED';

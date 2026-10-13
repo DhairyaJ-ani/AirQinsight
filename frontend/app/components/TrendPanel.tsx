@@ -17,7 +17,7 @@ import {
 import { PinpointAttributionResult } from '@/lib/types';
 import StatusBadge from './StatusBadge';
 import DatePicker from '../visualization/_components/DatePicker';
-import { REGULATORY_SCALES } from '@/lib/constants';
+import { REGULATORY_SCALES, getHazardCategory } from '@/lib/constants';
 
 interface TrendPanelProps {
   data: PinpointAttributionResult | null;
@@ -41,8 +41,14 @@ export default function TrendPanel({
 
   if (!data) return null;
 
+  const polKey = (data.pollutant || 'no2').toLowerCase();
+  const polName = data.pollutantName || (polKey === 'no2' ? 'NO₂' : polKey.toUpperCase());
+  const units = data.units || (polKey === 'no2' ? 'µmol/m²' : 'µg/m³');
+  const currentValue = data.currentValue ?? data.currentNO2;
+  const isColumn = data.measurementType === 'satellite_column';
+
   const currentScale =
-    REGULATORY_SCALES.find((s) => s.category === data.hazardBand) ||
+    getHazardCategory(currentValue, polKey) ||
     REGULATORY_SCALES[0];
 
   const handleHorizonClick = (offset: number) => {
@@ -63,28 +69,28 @@ export default function TrendPanel({
     }
   };
 
-  // Find max forecast NO2 for relative sparkline bar heights
-  const maxForecast = Math.max(...data.forecast.map((f) => f.no2Value), 150);
+  // Find max forecast for relative sparkline bar heights
+  const maxForecast = Math.max(...data.forecast.map((f) => f.value ?? f.no2Value), 100);
 
   // Generate synthetic CSV export
   const handleExportCSV = () => {
     const csvContent =
       'data:text/csv;charset=utf-8,' +
       [
-        'Location,Latitude,Longitude,Current_NO2_ugm3,Hazard_Band,Wind_Speed_ms,Wind_Dir',
-        `"${data.locationName}",${data.coordinates[0]},${data.coordinates[1]},${data.currentNO2},${data.hazardBand},${data.windVector.speed},"${data.windVector.direction}"`,
+        `Location,Latitude,Longitude,Pollutant,Current_Value_${units.replace(/[^a-zA-Z0-9]/g, '_')},Hazard_Band,Wind_Speed_ms,Wind_Dir`,
+        `"${data.locationName}",${data.coordinates[0]},${data.coordinates[1]},"${polName}",${currentValue},${data.hazardBand},${data.windVector.speed},"${data.windVector.direction}"`,
         '',
-        'Forecast_Hour,Predicted_NO2_ugm3,Dispersion_Factor',
+        `Forecast_Hour,Predicted_${polName}_${units.replace(/[^a-zA-Z0-9]/g, '_')},Dispersion_Factor`,
         ...data.forecast.map(
-          (f) => `+${f.timeOffsetHours}h,${f.no2Value},${f.dispersionFactor}`
+          (f) => `+${f.timeOffsetHours}h,${f.value ?? f.no2Value},${f.dispersionFactor}`
         ),
         '',
-        'Source_Name,Category,Distance_km,Attribution_Percent',
+        'Source_Name,Category,Distance_km,Attribution_Status',
         ...data.sources.map(
           (s) =>
             `"${s.name}",${s.category},${s.distanceKm || 0},${
-              s.attributionPercentage || 0
-            }%`
+              s.attributionPercentage !== undefined ? `${s.attributionPercentage}%` : 'Candidate nearby source'
+            }`
         ),
       ].join('\n');
 
@@ -93,7 +99,7 @@ export default function TrendPanel({
     link.setAttribute('href', encodedUri);
     link.setAttribute(
       'download',
-      `aeropulse_trends_${data.locationName.replace(/[^a-zA-Z0-9]/g, '_')}.csv`
+      `airq_${polKey}_trends_${data.locationName.replace(/[^a-zA-Z0-9]/g, '_')}.csv`
     );
     document.body.appendChild(link);
     link.click();
@@ -112,6 +118,11 @@ export default function TrendPanel({
             <span className="text-[10px] font-mono text-zinc-400">
               {data.coordinates[0].toFixed(3)}°N, {data.coordinates[1].toFixed(3)}°E
             </span>
+            {data.datasetId && (
+              <span className="text-[9px] font-mono text-zinc-500 bg-[#161a26] px-1 py-0.2 rounded border border-[#242938]">
+                {data.datasetId}
+              </span>
+            )}
           </div>
           <h2 className="font-semibold text-sm text-zinc-100 mt-1 truncate max-w-[270px]">
             {data.locationName}
@@ -137,17 +148,20 @@ export default function TrendPanel({
         {/* Real-time Concentration & Hazard Badge */}
         <div className="p-3 rounded-md bg-[#161a26] border border-[#242938]">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] text-zinc-400 font-medium">
-              Current Surface NO₂
+            <span className="text-[11px] text-zinc-400 font-medium flex items-center gap-1.5">
+              <span>Current {polName}</span>
+              <span className="text-[9px] font-mono text-zinc-500">
+                ({isColumn ? 'Tropospheric Column' : 'Surface Concentration'})
+              </span>
             </span>
             <StatusBadge type="hazard" value={data.hazardBand} />
           </div>
 
           <div className="flex items-baseline gap-2">
             <span className="text-3xl font-bold font-mono text-white tracking-tight">
-              {data.currentNO2}
+              {currentValue}
             </span>
-            <span className="text-xs text-zinc-400 font-mono">µg/m³</span>
+            <span className="text-xs text-zinc-400 font-mono">{units}</span>
             <span className="text-[11px] text-zinc-400 ml-auto">
               {currentScale.description}
             </span>
@@ -165,7 +179,7 @@ export default function TrendPanel({
           </div>
         </div>
 
-        {/* Temporal Trends & Wind Dispersion Scrubber (Feature 2) */}
+        {/* Temporal Trends & Wind Dispersion Scrubber */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 font-semibold text-zinc-200">
@@ -182,16 +196,11 @@ export default function TrendPanel({
           <div className="p-3 rounded-md bg-[#161a26] border border-[#242938]">
             <div className="h-24 flex items-end justify-between gap-2 pt-2 px-1">
               {data.forecast.map((f) => {
-                const heightPercent = Math.min(100, Math.round((f.no2Value / maxForecast) * 100));
+                const val = f.value ?? f.no2Value;
+                const heightPercent = Math.min(100, Math.round((val / maxForecast) * 100));
                 const isSelected = selectedHorizon === f.timeOffsetHours;
-                const barColor =
-                  f.no2Value <= 40
-                    ? '#10b981'
-                    : f.no2Value <= 80
-                    ? '#eab308'
-                    : f.no2Value <= 180
-                    ? '#f97316'
-                    : '#ef4444';
+                const ptScale = getHazardCategory(val, polKey);
+                const barColor = ptScale.color;
 
                 return (
                   <button
@@ -200,7 +209,7 @@ export default function TrendPanel({
                     className="flex-1 flex flex-col items-center gap-1 h-full justify-end group focus:outline-none"
                   >
                     <span className="text-[10px] font-mono text-zinc-300 group-hover:text-white">
-                      {f.no2Value}
+                      {val}
                     </span>
                     <div className="w-full bg-[#202638] rounded-t overflow-hidden flex items-end h-16">
                       <div
@@ -226,7 +235,7 @@ export default function TrendPanel({
             </div>
 
             <div className="mt-2 pt-2 border-t border-[#242938] flex items-center justify-between text-[10px] text-zinc-400 font-mono">
-              <span>Current Model Run</span>
+              <span>{polName} Forecast Model</span>
               <span className="text-blue-400">
                 Selected: +{selectedHorizon}h projection
               </span>
@@ -234,21 +243,32 @@ export default function TrendPanel({
           </div>
         </div>
 
-        {/* Point-Source Attribution Breakdown (Feature 4 - SAWI) */}
+        {/* Point-Source Attribution Section */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5 font-semibold text-zinc-200">
               <Factory className="w-3.5 h-3.5 text-rose-400" />
-              <span>Source Attribution (SAWI Breakdown)</span>
+              <span>
+                {data.attributionAvailable
+                  ? 'Source Attribution (SAWI Breakdown)'
+                  : 'Candidate Nearby Sources'}
+              </span>
             </div>
-            <span className="text-[10px] font-mono text-zinc-400">12KM RADIUS</span>
+            <span className="text-[10px] font-mono text-zinc-400">15KM RADIUS</span>
           </div>
 
-          {/* Natural Language Summary as required by FR-4.4 */}
+          {/* Natural Language Summary */}
           <div className="p-2.5 rounded bg-blue-950/20 border border-blue-900/40 text-[11px] text-blue-200/90 leading-relaxed flex items-start gap-2">
             <Info className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
             <p>{data.summary}</p>
           </div>
+
+          {data.attributionNote && (
+            <div className="p-2 rounded bg-amber-950/20 border border-amber-900/40 text-[10px] text-amber-300 font-mono flex items-center gap-1.5">
+              <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+              <span>{data.attributionNote}</span>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             {data.sources.map((src) => (
@@ -261,18 +281,30 @@ export default function TrendPanel({
                     {getSourceIcon(src.category)}
                     <span className="truncate">{src.name}</span>
                   </div>
-                  <span className="font-mono font-semibold text-blue-400 text-xs shrink-0">
-                    {src.attributionPercentage || 0}%
-                  </span>
+                  {data.attributionAvailable && src.attributionPercentage !== undefined ? (
+                    <span className="font-mono font-semibold text-blue-400 text-xs shrink-0">
+                      {src.attributionPercentage}%
+                    </span>
+                  ) : (
+                    <span className="font-mono text-[10px] text-zinc-500 shrink-0">
+                      Nearby Facility
+                    </span>
+                  )}
                 </div>
 
-                {/* Progress bar showing attribution contribution */}
-                <div className="w-full h-1.5 bg-[#242938] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 rounded-full"
-                    style={{ width: `${src.attributionPercentage || 0}%` }}
-                  />
-                </div>
+                {/* Progress bar showing attribution contribution (only if calibrated quantitative attribution is supported) */}
+                {data.attributionAvailable && src.attributionPercentage !== undefined ? (
+                  <div className="w-full h-1.5 bg-[#242938] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-500 rounded-full"
+                      style={{ width: `${src.attributionPercentage}%` }}
+                    />
+                  </div>
+                ) : (
+                  <div className="text-[10px] text-zinc-500 italic">
+                    Proximity alone does not establish emission causality
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono">
                   <span>Proximity: {src.distanceKm || 0} km</span>
@@ -290,11 +322,13 @@ export default function TrendPanel({
             <div>
               <div className="font-medium text-zinc-200">Regulatory Audit Status</div>
               <div className="text-[10px] text-zinc-400">
-                {data.regulatoryCompliance === 'COMPLIANT'
+                {isColumn
+                  ? 'Satellite column (not directly compared to surface NAAQS standard)'
+                  : data.regulatoryCompliance === 'COMPLIANT'
                   ? 'Within national standards'
                   : data.regulatoryCompliance === 'EXCEEDANCE_WARNING'
-                  ? 'Exceeds 24-hr NAAQS guideline'
-                  : 'Critical threshold alert triggered'}
+                  ? `Exceeds 24-hr NAAQS guideline for ${polName}`
+                  : `Critical ${polName} threshold alert triggered`}
               </div>
             </div>
           </div>

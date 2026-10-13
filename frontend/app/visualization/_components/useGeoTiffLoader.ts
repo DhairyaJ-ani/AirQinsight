@@ -87,11 +87,17 @@ export function useGeoTiffLoader(
       }
 
       const dateStr = timestamp.split('T')[0];
+      const polKey = (pollutant || 'no2').toLowerCase();
       // Use historical endpoint for specific dataset or fall back to downscale
-      const url =
-        datasetId === 'no2_samples_8day'
-          ? `${API_BASE}/api/v1/historical/no2_samples_8day/${pollutant}/${dateStr}/geotiff`
-          : `${API_BASE}/api/v1/downscale/geotiff?timestamp=${encodeURIComponent(timestamp)}`;
+      let url: string;
+      if (datasetId === 'no2_samples_8day') {
+        url = `${API_BASE}/api/v1/historical/no2_samples_8day/${polKey}/${dateStr}/geotiff`;
+      } else {
+        url = `${API_BASE}/api/v1/downscale/geotiff?timestamp=${encodeURIComponent(timestamp)}`;
+        if (polKey !== 'no2') {
+          url += `&pollutant=${encodeURIComponent(polKey)}`;
+        }
+      }
 
       const response = await fetch(url, { headers });
 
@@ -162,7 +168,7 @@ export function useGeoTiffLoader(
       setBbox(fallbackFrame.bbox);
       return fallbackFrame;
     }
-  }, []);
+  }, [datasetId, pollutant]);
 
   const loadFrame = useCallback(
     async (timestamp: string): Promise<Frame> => {

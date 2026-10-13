@@ -12,29 +12,46 @@ import numpy as np
 import rasterio
 
 
-def data_dir() -> Path:
-    for candidate in (Path("data/test_data"), Path("backend/data/test_data")):
+def data_dir(pollutant: str = "no2") -> Path:
+    pol_key = (pollutant or "no2").lower()
+    folder_map = {"pm25": "PM25", "pm10": "PM10", "so2": "SO2", "o3": "O3", "co": "CO"}
+    if pol_key in folder_map:
+        folder = folder_map[pol_key]
+        candidates = (Path(f"data/pollutant_samples/{folder}"), Path(f"backend/data/pollutant_samples/{folder}"))
+    else:
+        candidates = (Path("data/test_data"), Path("backend/data/test_data"))
+
+    for candidate in candidates:
         if candidate.exists():
             return candidate
-    return Path("data/test_data")
+    return candidates[0]
 
 
-def available_dates() -> list[str]:
+def available_dates(pollutant: str = "no2") -> list[str]:
     dates = set()
-    for file in data_dir().glob("*.tif"):
-        match = re.search(r"(\d{4}-\d{2}-\d{2})", file.name)
-        if match:
-            dates.add(match.group(1))
+    d = data_dir(pollutant)
+    if d.exists():
+        for file in d.glob("*.tif"):
+            match = re.search(r"(\d{4}-\d{2}-\d{2})", file.name)
+            if match:
+                dates.add(match.group(1))
     return sorted(dates)
 
 
-def read_day(date: str) -> tuple[np.ndarray, rasterio.Affine, str]:
-    """(values, transform, date used) for one day; clouds filled with the day's mean like the plume stream."""
-    path = data_dir() / f"no2_raw_coarse_{date}.tif"
+def read_day(date: str, pollutant: str = "no2") -> tuple[np.ndarray, rasterio.Affine, str]:
+    """(values, transform, date used) for one day and pollutant; clouds/missing filled with the day's mean like the plume stream."""
+    d = data_dir(pollutant)
+    pol_key = (pollutant or "no2").lower()
+    folder_map = {"pm25": "PM25", "pm10": "PM10", "so2": "SO2", "o3": "O3", "co": "CO"}
+    if pol_key in folder_map:
+        path = d / f"{folder_map[pol_key]}_{date}.tif"
+    else:
+        path = d / f"no2_raw_coarse_{date}.tif"
+
     if not path.exists():
-        files = sorted(data_dir().glob("*.tif"))
+        files = sorted(d.glob("*.tif"))
         if not files:
-            raise FileNotFoundError("No uploaded GeoTIFF data found")
+            raise FileNotFoundError(f"No uploaded GeoTIFF data found for {pollutant}")
         path = files[0]
     with rasterio.open(path) as src:
         arr = src.read(1).astype(np.float32)
@@ -58,14 +75,27 @@ def compass(deg: float) -> str:
     return names[int(((deg % 360) + 22.5) // 45) % 8]
 
 
-def point_forecast(lat: float, lon: float, date: str, horizons_h: tuple[int, ...] = (3, 6, 12, 24)) -> dict:
-    """NO2 at the point from that day's upload, and the forecasting model's predictions from it (hybrid
+def point_forecast(lat: float, lon: float, date: str, horizons_h: tuple[int, ...] = (3, 6, 12, 24), pollutant: str = "no2") -> dict:
+    """Pollutant at the point from that day's upload, and the forecasting model's predictions from it (hybrid
     physics + AI residual) under the Plume Flow wind cycle. ``inside`` is False when the point is outside the
     uploaded area (values are then from the nearest cell)."""
     from ml_engine.forecasting.config import ForecastConfig, PhysicsConfig
     from ml_engine.forecasting.engine import ForecastEngine
 
-    arr, t, used = read_day(date)
+    pol_key = (pollutant or "no2").lower()
+    meta_units = {
+        "no2": "µmol/m²",
+        "pm25": "µg/m³",
+        "pm10": "µg/m³",
+        "so2": "µg/m³",
+        "o3": "µg/m³",
+        "co": "µg/m³",
+    }
+    units = meta_units.get(pol_key, "µg/m³")
+    measurement_type = "satellite_column" if pol_key == "no2" else "surface_concentration"
+    dataset_id = "no2_61day_2025" if pol_key == "no2" else f"{pol_key}_cams_61day_2025"
+
+    arr, t, used = read_day(date, pollutant=pol_key)
     h, w = arr.shape
     y = (t.f + t.e * (np.arange(h) + 0.5)).astype(np.float32)
     x = (t.c + t.a * (np.arange(w) + 0.5)).astype(np.float32)
@@ -84,9 +114,14 @@ def point_forecast(lat: float, lon: float, date: str, horizons_h: tuple[int, ...
     wind_from = (math.degrees(math.atan2(-u0, -v0)) + 360) % 360
     return {
         "date": used,
+        "pollutant": pol_key,
+        "dataset_id": dataset_id,
+        "units": units,
+        "measurement_type": measurement_type,
         "inside": inside,
         "value": round(float(arr[j, i]), 1),
-        "horizons": [{"hours": hr, "no2": round(float(result.no2_hybrid[by_h[hr]][j, i]), 1),
+        "horizons": [{"hours": hr, "value": round(float(result.no2_hybrid[by_h[hr]][j, i]), 1),
+                      "no2": round(float(result.no2_hybrid[by_h[hr]][j, i]), 1),
                       "confidence": round(float(result.confidence[by_h[hr]][j, i]), 2)}
                      for hr in horizons_h if hr in by_h],
         "wind": {"speed": round(math.hypot(u0, v0), 1), "deg": round(wind_from), "direction": compass(wind_from)},

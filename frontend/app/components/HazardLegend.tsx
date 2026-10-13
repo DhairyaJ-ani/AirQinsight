@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { REGULATORY_SCALES } from '@/lib/constants';
+import { REGULATORY_SCALES, POLLUTANT_REGULATORY_SCALES } from '@/lib/constants';
 import { POLLUTANT_DEFS } from './PollutantSelector';
 
 interface HazardLegendProps {
@@ -10,7 +10,9 @@ interface HazardLegendProps {
 }
 
 export default function HazardLegend({ compact = false, pollutant = 'no2' }: HazardLegendProps) {
-  const pol = POLLUTANT_DEFS.find((p) => p.key === pollutant.toLowerCase()) || POLLUTANT_DEFS[0];
+  const polKey = (pollutant || 'no2').toLowerCase();
+  const pol = POLLUTANT_DEFS.find((p) => p.key === polKey) || POLLUTANT_DEFS[0];
+  const scales = (POLLUTANT_REGULATORY_SCALES as any)[polKey] || REGULATORY_SCALES;
 
   if (compact) {
     return (
@@ -19,7 +21,7 @@ export default function HazardLegend({ compact = false, pollutant = 'no2' }: Haz
           {pol.formula} Regulatory Index ({pol.units})
         </div>
         <div className="flex items-center gap-1 w-full">
-          {REGULATORY_SCALES.map((scale) => (
+          {scales.map((scale: any) => (
             <div
               key={scale.category}
               className="flex-1 h-2 rounded-xs first:rounded-l last:rounded-r"
@@ -29,10 +31,10 @@ export default function HazardLegend({ compact = false, pollutant = 'no2' }: Haz
           ))}
         </div>
         <div className="flex justify-between text-[10px] text-zinc-400 font-mono mt-0.5">
-          <span>0</span>
-          <span>40</span>
-          <span>80</span>
-          <span>180+</span>
+          <span>{scales[0]?.range[0] ?? 0}</span>
+          <span>{scales[1]?.range[0] ?? 40}</span>
+          <span>{scales[2]?.range[0] ?? 80}</span>
+          <span>{scales[3]?.range[0] ?? 180}+</span>
         </div>
       </div>
     );
@@ -57,17 +59,15 @@ export default function HazardLegend({ compact = false, pollutant = 'no2' }: Haz
           }}
         />
         <div className="flex justify-between text-[9px] text-zinc-400 font-mono mt-1 px-0.5">
-          <span>0</span>
-          <span>40</span>
-          <span>80</span>
-          <span>120</span>
-          <span>160</span>
-          <span>200+</span>
+          {scales.map((s: any, idx: number) => (
+            <span key={idx}>{s.range[0]}</span>
+          ))}
+          <span>{scales[scales.length - 1]?.range[1]}+</span>
         </div>
       </div>
 
       <div className="space-y-2">
-        {REGULATORY_SCALES.map((scale) => (
+        {scales.map((scale: any) => (
           <div key={scale.category} className="flex items-start gap-2.5">
             <span
               className="w-2.5 h-2.5 rounded-full shrink-0 mt-0.5 shadow-xs"

@@ -185,7 +185,7 @@ export default function VisualizationMap() {
         }
 
         // Fallback to downscale/dates
-        const fallbackRes = await fetch(`${API_BASE}/api/v1/downscale/dates`, { headers });
+        const fallbackRes = await fetch(`${API_BASE}/api/v1/downscale/dates?pollutant=${encodeURIComponent(selectedPollutant)}`, { headers });
         if (fallbackRes.ok) {
           const data = await fallbackRes.json();
           if (!isCancelled && Array.isArray(data?.dates) && data.dates.length > 0) {
@@ -300,6 +300,7 @@ export default function VisualizationMap() {
         height={gridHeight}
         mapRef={mapRef}
         opacity={opacity}
+        pollutant={selectedPollutant}
       />
 
       {/* Layer 20: Top Navigation & Multi-Pollutant Control Bar */}
@@ -374,14 +375,18 @@ export default function VisualizationMap() {
 
         {/* Right: Scientific Measurement Badge & Opacity */}
         <div className="flex items-center gap-2 pointer-events-auto">
-          {/* Tropospheric Column Badge */}
+          {/* Scientific Measurement Badge */}
           <div className="relative">
             <button
               onClick={() => setShowScienceTooltip((prev) => !prev)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-[#11141d]/95 border border-amber-500/30 text-amber-300 shadow-2xl backdrop-blur-md text-xs font-mono font-medium hover:bg-amber-500/10 transition-colors"
             >
               <Info className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden md:inline">Tropospheric Column</span>
+              <span className="hidden md:inline">
+                {activePolDef.measurementType === 'satellite_column'
+                  ? 'Tropospheric Column'
+                  : 'Surface Concentration'}
+              </span>
               <span className="text-[10px] bg-amber-500/20 px-1 py-0.2 rounded border border-amber-500/30">
                 {activePolDef.units}
               </span>
@@ -396,12 +401,25 @@ export default function VisualizationMap() {
                     ✕
                   </button>
                 </div>
-                <p className="text-[11px] leading-relaxed">
-                  Sentinel-5P TROPOMI measures <strong className="text-amber-200">atmospheric column density ({activePolDef.units})</strong> across the vertical troposphere.
-                </p>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  This represents integrated molecules per unit area, <span className="underline decoration-amber-400">not surface concentration (µg/m³)</span> at human breathing height. Cloud-masked pixels are masked to null.
-                </p>
+                {activePolDef.measurementType === 'satellite_column' ? (
+                  <>
+                    <p className="text-[11px] leading-relaxed">
+                      Sentinel-5P TROPOMI measures <strong className="text-amber-200">atmospheric column density ({activePolDef.units})</strong> across the vertical troposphere.
+                    </p>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      This represents integrated molecules per unit area, <span className="underline decoration-amber-400">not surface concentration (µg/m³)</span> at human breathing height. Cloud-masked pixels are masked to null.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-[11px] leading-relaxed">
+                      CAMS reanalysis provides modelled <strong className="text-amber-200">surface ambient concentration ({activePolDef.units})</strong> at 2m breathing level.
+                    </p>
+                    <p className="text-[11px] text-zinc-400 leading-relaxed">
+                      Evaluated against CPCB NAAQS thresholds. Chemical dispersion depends on local topography and diurnal boundary layer dynamics.
+                    </p>
+                  </>
+                )}
               </div>
             )}
           </div>

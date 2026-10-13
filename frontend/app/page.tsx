@@ -22,7 +22,7 @@ interface PointForecast {
   date: string;
   inside: boolean;
   value: number;
-  horizons: { hours: number; no2: number; confidence: number }[];
+  horizons: { hours: number; no2?: number; value?: number; confidence: number }[];
   wind: { speed: number; deg: number; direction: string };
 }
 
@@ -77,7 +77,8 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_BASE}/api/v1/downscale/dates`, { headers: authHeaders() })
+    const url = `${API_BASE}/api/v1/downscale/dates?pollutant=${encodeURIComponent(selectedPollutant)}`;
+    fetch(url, { headers: authHeaders() })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && Array.isArray(data?.dates) && data.dates.length > 0) {
@@ -90,15 +91,15 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [selectedPollutant]);
 
   // Value at the pin for the selected day + the forecasting model's predictions (fast; mock values until then)
-  const pointKey = selectedCoords && selectedDate ? `${selectedCoords[0]},${selectedCoords[1]},${selectedDate}` : '';
+  const pointKey = selectedCoords && selectedDate ? `${selectedCoords[0]},${selectedCoords[1]},${selectedDate},${selectedPollutant}` : '';
   useEffect(() => {
     if (!pointKey || !selectedCoords) return;
     let cancelled = false;
     const [lat, lon] = selectedCoords;
-    fetch(`${API_BASE}/api/v1/trends/point?lat=${lat}&lon=${lon}&date=${selectedDate}`, { headers: authHeaders() })
+    fetch(`${API_BASE}/api/v1/trends/point?lat=${lat}&lon=${lon}&date=${selectedDate}&pollutant=${encodeURIComponent(selectedPollutant)}`, { headers: authHeaders() })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (!cancelled && data) setPointForecast({ ...data, key: pointKey });
@@ -107,36 +108,42 @@ export default function HomePage() {
     return () => {
       cancelled = true;
     };
-  }, [pointKey, selectedCoords, selectedDate]);
+  }, [pointKey, selectedCoords, selectedDate, selectedPollutant]);
 
   const [trendData, setTrendData] = useState<PinpointAttributionResult | null>(() =>
-    calculateAttribution(PRESET_REGIONS[0].center[0], PRESET_REGIONS[0].center[1], 'Shivaji Park, Mumbai')
+    calculateAttribution(PRESET_REGIONS[0].center[0], PRESET_REGIONS[0].center[1], 'Shivaji Park, Mumbai', 'no2')
   );
+
+  // Keep trendData updated when selectedPollutant changes
+  useEffect(() => {
+    if (!selectedCoords) return;
+    setTrendData(calculateAttribution(selectedCoords[0], selectedCoords[1], selectedLocationName, selectedPollutant));
+  }, [selectedPollutant]);
 
   const pinpointData = useMemo<PinpointAttributionResult | null>(() => {
     if (!trendData) return null;
     const pf = pointForecast;
     if (!pf || pf.key !== pointKey || !pf.inside) return trendData;
     const current = Math.round(pf.value);
-    const hazard = getHazardCategory(current);
+    const hazard = getHazardCategory(current, selectedPollutant);
     const byHours = new Map(pf.horizons.map((h) => [h.hours, h]));
     const forecast = trendData.forecast.map((f) => {
-      if (f.timeOffsetHours === 0) return { ...f, no2Value: current, dispersionFactor: 1, projectedAQI: current };
+      if (f.timeOffsetHours === 0) return { ...f, no2Value: current, value: current, dispersionFactor: 1, projectedAQI: current };
       const h = byHours.get(f.timeOffsetHours);
       if (!h) return f;
-      const v = Math.round(h.no2);
-      return { ...f, no2Value: v, dispersionFactor: current ? Math.round((v / current) * 100) / 100 : 1, projectedAQI: v };
+      const v = Math.round(h.no2 ?? h.value ?? current);
+      return { ...f, no2Value: v, value: v, dispersionFactor: current ? Math.round((v / current) * 100) / 100 : 1, projectedAQI: v };
     });
     return {
       ...trendData,
       currentNO2: current,
+      currentValue: current,
       hazardBand: hazard.category,
       forecast,
       windVector: { speed: pf.wind.speed, direction: `${pf.wind.direction} (${pf.wind.deg}°)`, deg: pf.wind.deg },
-      summary: trendData.summary.replace(`(${trendData.currentNO2} µg/m³)`, `(${current} µg/m³)`),
-      regulatoryCompliance: current > 180 ? 'CRITICAL_VIOLATION' : current > 80 ? 'EXCEEDANCE_WARNING' : 'COMPLIANT',
+      summary: trendData.summary.replace(/\(\d+\s*[^)]*\)/, `(${current} ${trendData.units || 'µg/m³'})`),
     };
-  }, [trendData, pointForecast, pointKey]);
+  }, [trendData, pointForecast, pointKey, selectedPollutant]);
 
   // Handle toggling of individual map layers
   const handleToggleLayer = (
@@ -158,7 +165,7 @@ export default function HomePage() {
     );
     const name = region?.name || 'Selected Benchmark Region';
     setSelectedLocationName(name);
-    setTrendData(calculateAttribution(coords[0], coords[1], name));
+    setTrendData(calculateAttribution(coords[0], coords[1], name, selectedPollutant));
   };
 
   // Handle selecting from location search bar or geocoding
@@ -167,7 +174,7 @@ export default function HomePage() {
     setMapZoom(14); // Fixed locality level
     setSelectedCoords(coords);
     setSelectedLocationName(name);
-    setTrendData(calculateAttribution(coords[0], coords[1], name));
+    setTrendData(calculateAttribution(coords[0], coords[1], name, selectedPollutant));
   };
 
   // Handle clicking directly on map coordinates (pin drop)
@@ -176,7 +183,7 @@ export default function HomePage() {
     setMapCenter(coords);
     const customName = `Pinpoint (${coords[0].toFixed(3)}°N, ${coords[1].toFixed(3)}°E)`;
     setSelectedLocationName(customName);
-    setTrendData(calculateAttribution(coords[0], coords[1], customName));
+    setTrendData(calculateAttribution(coords[0], coords[1], customName, selectedPollutant));
   };
 
   return (

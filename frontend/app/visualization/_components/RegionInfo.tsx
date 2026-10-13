@@ -3,6 +3,7 @@
 import React, { useMemo } from 'react';
 import { Compass, BarChart2 } from 'lucide-react';
 import DatePicker from './DatePicker';
+import { getHazardCategory } from '@/lib/constants';
 
 export interface RegionInfoProps {
   bbox: [number, number, number, number] | null;
@@ -72,7 +73,8 @@ export default function RegionInfo({
   // Determine hazard classification badge based on WHO/CPCB breakpoints
   const hazardBadge = useMemo(() => {
     const { mean } = stats;
-    if (mean <= 40) {
+    const cat = getHazardCategory(mean, pollutant);
+    if (cat.category === 'NORMAL') {
       return {
         label: 'Good Air Quality',
         textColor: 'text-emerald-300',
@@ -81,7 +83,7 @@ export default function RegionInfo({
         dotColor: 'bg-emerald-400',
       };
     }
-    if (mean <= 80) {
+    if (cat.category === 'MODERATE') {
       return {
         label: 'Moderate Hazard',
         textColor: 'text-amber-300',
@@ -90,7 +92,7 @@ export default function RegionInfo({
         dotColor: 'bg-amber-400',
       };
     }
-    if (mean <= 120) {
+    if (cat.category === 'UNHEALTHY') {
       return {
         label: 'Unhealthy for Sensitive',
         textColor: 'text-orange-300',
@@ -106,7 +108,7 @@ export default function RegionInfo({
       borderColor: 'border-rose-500/40',
       dotColor: 'bg-rose-500',
     };
-  }, [stats]);
+  }, [stats, pollutant]);
 
   return (
     <div className="w-80 sm:w-96 bg-[#11141d]/95 backdrop-blur-md border border-[#242938] rounded-xl p-3.5 shadow-2xl text-[#f1f3f7] select-none">

@@ -40,11 +40,244 @@ export const REGULATORY_SCALES: RegulatoryScale[] = [
   },
 ];
 
-export function getHazardCategory(no2Value: number): RegulatoryScale {
-  if (no2Value <= 40) return REGULATORY_SCALES[0];
-  if (no2Value <= 80) return REGULATORY_SCALES[1];
-  if (no2Value <= 180) return REGULATORY_SCALES[2];
-  return REGULATORY_SCALES[3];
+export const POLLUTANT_REGULATORY_SCALES: Record<string, RegulatoryScale[]> = {
+  no2: [
+    {
+      range: [0, 40],
+      label: '0 - 40 µg/m³',
+      category: 'NORMAL',
+      color: '#00e400',
+      bgColor: 'rgba(0, 228, 0, 0.15)',
+      description: 'Satisfactory; within WHO annual & 24h targets.',
+      healthAdvisory: 'Air pollution poses little or no risk.',
+    },
+    {
+      range: [41, 80],
+      label: '41 - 80 µg/m³',
+      category: 'MODERATE',
+      color: '#ffff00',
+      bgColor: 'rgba(255, 255, 0, 0.15)',
+      description: 'Moderate; complies with India 24-h NAAQS (80 µg/m³).',
+      healthAdvisory: 'Sensitive individuals should limit prolonged outdoor exertion.',
+    },
+    {
+      range: [81, 180],
+      label: '81 - 180 µg/m³',
+      category: 'UNHEALTHY',
+      color: '#ff7e00',
+      bgColor: 'rgba(255, 126, 0, 0.15)',
+      description: 'Unhealthy; exceeds India 24-h NAAQS.',
+      healthAdvisory: 'Asthmatics and elderly should avoid outdoor exercise.',
+    },
+    {
+      range: [181, 500],
+      label: '> 180 µg/m³',
+      category: 'HAZARDOUS',
+      color: '#ff0000',
+      bgColor: 'rgba(255, 0, 0, 0.15)',
+      description: 'Hazardous; severe photochemical exceedance.',
+      healthAdvisory: 'Emergency health warning: Entire population is affected.',
+    },
+  ],
+  pm25: [
+    {
+      range: [0, 30],
+      label: '0 - 30 µg/m³',
+      category: 'NORMAL',
+      color: '#00e400',
+      bgColor: 'rgba(0, 228, 0, 0.15)',
+      description: 'Satisfactory; within baseline.',
+      healthAdvisory: 'Air quality is acceptable for all groups.',
+    },
+    {
+      range: [31, 60],
+      label: '31 - 60 µg/m³',
+      category: 'MODERATE',
+      color: '#ffff00',
+      bgColor: 'rgba(255, 255, 0, 0.15)',
+      description: 'Moderate; complies with India 24-h NAAQS (60 µg/m³).',
+      healthAdvisory: 'Sensitive individuals may experience minor breathing discomfort.',
+    },
+    {
+      range: [61, 120],
+      label: '61 - 120 µg/m³',
+      category: 'UNHEALTHY',
+      color: '#ff7e00',
+      bgColor: 'rgba(255, 126, 0, 0.15)',
+      description: 'Poor / Exceeds 24-h standard.',
+      healthAdvisory: 'Breathing discomfort to people with lung disease, children, and elderly.',
+    },
+    {
+      range: [121, 500],
+      label: '> 120 µg/m³',
+      category: 'HAZARDOUS',
+      color: '#ff0000',
+      bgColor: 'rgba(255, 0, 0, 0.15)',
+      description: 'Very Poor to Severe particulate hazard.',
+      healthAdvisory: 'Respiratory illness on prolonged exposure. Avoid strenuous outdoor activities.',
+    },
+  ],
+  pm10: [
+    {
+      range: [0, 50],
+      label: '0 - 50 µg/m³',
+      category: 'NORMAL',
+      color: '#00e400',
+      bgColor: 'rgba(0, 228, 0, 0.15)',
+      description: 'Good air quality.',
+      healthAdvisory: 'Minimal impact.',
+    },
+    {
+      range: [51, 100],
+      label: '51 - 100 µg/m³',
+      category: 'MODERATE',
+      color: '#ffff00',
+      bgColor: 'rgba(255, 255, 0, 0.15)',
+      description: 'Moderate; within India 24-h NAAQS (100 µg/m³).',
+      healthAdvisory: 'Minor breathing discomfort to sensitive people.',
+    },
+    {
+      range: [101, 250],
+      label: '101 - 250 µg/m³',
+      category: 'UNHEALTHY',
+      color: '#ff7e00',
+      bgColor: 'rgba(255, 126, 0, 0.15)',
+      description: 'Unhealthy / Exceeds 24-h standard.',
+      healthAdvisory: 'Breathing discomfort to most people on prolonged exposure.',
+    },
+    {
+      range: [251, 1000],
+      label: '> 250 µg/m³',
+      category: 'HAZARDOUS',
+      color: '#ff0000',
+      bgColor: 'rgba(255, 0, 0, 0.15)',
+      description: 'Severe dust & coarse particulate episode.',
+      healthAdvisory: 'Healthy people affected and serious impacts on those with respiratory diseases.',
+    },
+  ],
+  so2: [
+    {
+      range: [0, 40],
+      label: '0 - 40 µg/m³',
+      category: 'NORMAL',
+      color: '#00e400',
+      bgColor: 'rgba(0, 228, 0, 0.15)',
+      description: 'Satisfactory; complies with WHO 24-h guideline.',
+      healthAdvisory: 'Minimal impact.',
+    },
+    {
+      range: [41, 80],
+      label: '41 - 80 µg/m³',
+      category: 'MODERATE',
+      color: '#ffff00',
+      bgColor: 'rgba(255, 255, 0, 0.15)',
+      description: 'Moderate; complies with India 24-h NAAQS (80 µg/m³).',
+      healthAdvisory: 'Sensitive individuals should limit prolonged exertion.',
+    },
+    {
+      range: [81, 200],
+      label: '81 - 200 µg/m³',
+      category: 'UNHEALTHY',
+      color: '#ff7e00',
+      bgColor: 'rgba(255, 126, 0, 0.15)',
+      description: 'Unhealthy / Exceeds 24-h standard.',
+      healthAdvisory: 'Bronchoconstriction and increased asthma symptoms.',
+    },
+    {
+      range: [201, 1000],
+      label: '> 200 µg/m³',
+      category: 'HAZARDOUS',
+      color: '#ff0000',
+      bgColor: 'rgba(255, 0, 0, 0.15)',
+      description: 'Hazardous; heavy sulfur combustion plume.',
+      healthAdvisory: 'High risk of acute respiratory distress.',
+    },
+  ],
+  o3: [
+    {
+      range: [0, 50],
+      label: '0 - 50 µg/m³',
+      category: 'NORMAL',
+      color: '#00e400',
+      bgColor: 'rgba(0, 228, 0, 0.15)',
+      description: 'Good air quality; low photochemical activity.',
+      healthAdvisory: 'Air quality is satisfactory.',
+    },
+    {
+      range: [51, 100],
+      label: '51 - 100 µg/m³',
+      category: 'MODERATE',
+      color: '#ffff00',
+      bgColor: 'rgba(255, 255, 0, 0.15)',
+      description: 'Moderate; complies with India 8-h NAAQS (100 µg/m³).',
+      healthAdvisory: 'Sensitive individuals should limit prolonged outdoor exertion.',
+    },
+    {
+      range: [101, 168],
+      label: '101 - 168 µg/m³',
+      category: 'UNHEALTHY',
+      color: '#ff7e00',
+      bgColor: 'rgba(255, 126, 0, 0.15)',
+      description: 'Unhealthy; photochemical smog exceedance.',
+      healthAdvisory: 'Respiratory irritation; coughing and throat irritation common.',
+    },
+    {
+      range: [169, 500],
+      label: '> 168 µg/m³',
+      category: 'HAZARDOUS',
+      color: '#ff0000',
+      bgColor: 'rgba(255, 0, 0, 0.15)',
+      description: 'Hazardous photochemical episode.',
+      healthAdvisory: 'Significant inflammation of airways and serious cardiovascular strain.',
+    },
+  ],
+  co: [
+    {
+      range: [0, 1000],
+      label: '0 - 1.0 mg/m³',
+      category: 'NORMAL',
+      color: '#00e400',
+      bgColor: 'rgba(0, 228, 0, 0.15)',
+      description: 'Satisfactory combustion levels.',
+      healthAdvisory: 'Minimal impact.',
+    },
+    {
+      range: [1001, 2000],
+      label: '1.0 - 2.0 mg/m³',
+      category: 'MODERATE',
+      color: '#ffff00',
+      bgColor: 'rgba(255, 255, 0, 0.15)',
+      description: 'Moderate; complies with India 8-h NAAQS (2 mg/m³).',
+      healthAdvisory: 'Cardiovascular patients should avoid heavy traffic corridors.',
+    },
+    {
+      range: [2001, 4000],
+      label: '2.0 - 4.0 mg/m³',
+      category: 'UNHEALTHY',
+      color: '#ff7e00',
+      bgColor: 'rgba(255, 126, 0, 0.15)',
+      description: 'Unhealthy; severe vehicular / incomplete combustion.',
+      healthAdvisory: 'Reduced oxygen delivery to body tissues.',
+    },
+    {
+      range: [4001, 20000],
+      label: '> 4.0 mg/m³',
+      category: 'HAZARDOUS',
+      color: '#ff0000',
+      bgColor: 'rgba(255, 0, 0, 0.15)',
+      description: 'Hazardous carbon monoxide accumulation.',
+      healthAdvisory: 'Acute health danger.',
+    },
+  ],
+};
+
+export function getHazardCategory(value: number, pollutant: string = 'no2'): RegulatoryScale {
+  const pol = (pollutant || 'no2').toLowerCase();
+  const scales = POLLUTANT_REGULATORY_SCALES[pol] || REGULATORY_SCALES;
+  for (const scale of scales) {
+    if (value <= scale.range[1]) return scale;
+  }
+  return scales[scales.length - 1];
 }
 
 // Preset regions for rapid navigation and testing
@@ -293,13 +526,26 @@ export function calculateDistanceKm(
   return R * c;
 }
 
+const POLLUTANT_NAMES: Record<string, { formula: string; units: string; naaqs24h: number; isColumn: boolean }> = {
+  no2: { formula: 'NO₂', units: 'µmol/m²', naaqs24h: 80, isColumn: true },
+  pm25: { formula: 'PM₂.₅', units: 'µg/m³', naaqs24h: 60, isColumn: false },
+  pm10: { formula: 'PM₁₀', units: 'µg/m³', naaqs24h: 100, isColumn: false },
+  so2: { formula: 'SO₂', units: 'µg/m³', naaqs24h: 80, isColumn: false },
+  o3: { formula: 'O₃', units: 'µg/m³', naaqs24h: 100, isColumn: false },
+  co: { formula: 'CO', units: 'µg/m³', naaqs24h: 2000, isColumn: false },
+};
+
 // Compute Source Attribution Weight Index (SAWI) based on proximity, emission factor, and wind alignment
 export function calculateAttribution(
   centerLat: number,
   centerLng: number,
-  locationName: string = 'Target Coordinate'
+  locationName: string = 'Target Coordinate',
+  pollutant: string = 'no2'
 ): PinpointAttributionResult {
-  // Find POIs within 12km buffer
+  const polKey = (pollutant || 'no2').toLowerCase();
+  const polInfo = POLLUTANT_NAMES[polKey] || POLLUTANT_NAMES.no2;
+
+  // Find POIs within 15km buffer
   const nearby = KNOWN_POIS.map((poi) => {
     const dist = calculateDistanceKm(centerLat, centerLng, poi.coordinates[0], poi.coordinates[1]);
     return {
@@ -308,7 +554,6 @@ export function calculateAttribution(
     };
   }).filter((poi) => poi.distanceKm <= 15);
 
-  // If none nearby, construct localized synthetic contributors based on coordinate
   const candidatePOIs = nearby.length > 0 ? nearby : [
     {
       id: 'local-1',
@@ -339,57 +584,85 @@ export function calculateAttribution(
     },
   ];
 
-  // Calculate raw weights: weight = emissionFactor / (distanceKm^1.2 + 0.1)
-  const weights = candidatePOIs.map((poi) => {
-    const d = poi.distanceKm ?? 1;
-    const w = poi.emissionFactor / (Math.pow(d, 1.2) + 0.2);
-    return Math.max(0.05, w);
-  });
+  // Quantitative source attribution logic:
+  // ONLY directly primary-emitted combustion species (NO2) have the calibrated SAWI model.
+  // Secondary species (O3) or uncalibrated species return attributionAvailable = false.
+  const isQuantitativeAttributionSupported = polKey === 'no2';
 
-  const totalWeight = weights.reduce((acc, val) => acc + val, 0);
-
-  const attributedSources = candidatePOIs.map((poi, idx) => {
-    const percentage = Math.round((weights[idx] / totalWeight) * 100);
-    return {
+  let attributedSources: POISource[] = [];
+  if (isQuantitativeAttributionSupported) {
+    const weights = candidatePOIs.map((poi) => {
+      const d = poi.distanceKm ?? 1;
+      const w = poi.emissionFactor / (Math.pow(d, 1.2) + 0.2);
+      return Math.max(0.05, w);
+    });
+    const totalWeight = weights.reduce((acc, val) => acc + val, 0);
+    attributedSources = candidatePOIs.map((poi, idx) => ({
       ...poi,
-      attributionPercentage: percentage,
-    };
-  }).sort((a, b) => (b.attributionPercentage ?? 0) - (a.attributionPercentage ?? 0));
+      attributionPercentage: Math.round((weights[idx] / totalWeight) * 100),
+    })).sort((a, b) => (b.attributionPercentage ?? 0) - (a.attributionPercentage ?? 0));
+  } else {
+    // For non-NO2, candidate sources are listed with proximity and context, but NO synthetic/invented percentages.
+    attributedSources = candidatePOIs.map((poi) => ({
+      ...poi,
+      attributionPercentage: undefined,
+    })).sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0));
+  }
 
-  // Determine current NO2 level based on proximity and top emission factor
-  const baseNoise = (Math.abs(Math.sin(centerLat * 100) * Math.cos(centerLng * 100)) * 40);
-  const primaryFactor = attributedSources[0]?.emissionFactor ?? 0.6;
-  const currentNO2 = Math.round(45 + primaryFactor * 95 + baseNoise);
+  // Base estimate per pollutant
+  const baseNoise = (Math.abs(Math.sin(centerLat * 100) * Math.cos(centerLng * 100)));
+  let baseVal = 40;
+  if (polKey === 'no2') baseVal = Math.round(45 + baseNoise * 40);
+  else if (polKey === 'pm25') baseVal = Math.round(35 + baseNoise * 25);
+  else if (polKey === 'pm10') baseVal = Math.round(75 + baseNoise * 50);
+  else if (polKey === 'so2') baseVal = Math.round(20 + baseNoise * 35);
+  else if (polKey === 'o3') baseVal = Math.round(65 + baseNoise * 45);
+  else if (polKey === 'co') baseVal = Math.round(600 + baseNoise * 600);
 
-  const hazard = getHazardCategory(currentNO2);
+  const hazard = getHazardCategory(baseVal, polKey);
 
-  // Generate predictive flow & dispersion trends (+0h, +3h, +6h, +12h, +24h)
   const forecast: PinpointAttributionResult['forecast'] = [
-    { timeOffsetHours: 0, label: 'Current', no2Value: currentNO2, dispersionFactor: 1.0, projectedAQI: currentNO2 },
-    { timeOffsetHours: 3, label: '+3 Hours', no2Value: Math.round(currentNO2 * 1.08), dispersionFactor: 1.08, projectedAQI: Math.round(currentNO2 * 1.08) },
-    { timeOffsetHours: 6, label: '+6 Hours', no2Value: Math.round(currentNO2 * 1.22), dispersionFactor: 1.22, projectedAQI: Math.round(currentNO2 * 1.22) },
-    { timeOffsetHours: 12, label: '+12 Hours', no2Value: Math.round(currentNO2 * 0.91), dispersionFactor: 0.91, projectedAQI: Math.round(currentNO2 * 0.91) },
-    { timeOffsetHours: 24, label: '+24 Hours', no2Value: Math.round(currentNO2 * 0.85), dispersionFactor: 0.85, projectedAQI: Math.round(currentNO2 * 0.85) },
+    { timeOffsetHours: 0, label: 'Current', no2Value: baseVal, value: baseVal, dispersionFactor: 1.0, projectedAQI: baseVal },
+    { timeOffsetHours: 3, label: '+3 Hours', no2Value: Math.round(baseVal * 1.08), value: Math.round(baseVal * 1.08), dispersionFactor: 1.08, projectedAQI: Math.round(baseVal * 1.08) },
+    { timeOffsetHours: 6, label: '+6 Hours', no2Value: Math.round(baseVal * 1.22), value: Math.round(baseVal * 1.22), dispersionFactor: 1.22, projectedAQI: Math.round(baseVal * 1.22) },
+    { timeOffsetHours: 12, label: '+12 Hours', no2Value: Math.round(baseVal * 0.91), value: Math.round(baseVal * 0.91), dispersionFactor: 0.91, projectedAQI: Math.round(baseVal * 0.91) },
+    { timeOffsetHours: 24, label: '+24 Hours', no2Value: Math.round(baseVal * 0.85), value: Math.round(baseVal * 0.85), dispersionFactor: 0.85, projectedAQI: Math.round(baseVal * 0.85) },
   ];
 
-  // Natural language summary as specified in FR-4.4
-  const top1 = attributedSources[0];
-  const top2 = attributedSources[1];
-  let summary = `Elevated NO₂ (${currentNO2} µg/m³) attributed predominantly (${top1?.attributionPercentage || 55}%) to ${top1?.name || 'vehicular emissions'}`;
-  if (top2) {
-    summary += ` and ${top2.attributionPercentage}% to ${top2.name}.`;
+  let summary = '';
+  let attributionNote: string | undefined = undefined;
+
+  if (isQuantitativeAttributionSupported) {
+    const top1 = attributedSources[0];
+    const top2 = attributedSources[1];
+    summary = `Observed ${polInfo.formula} (${baseVal} ${polInfo.units}) attributed predominantly (${top1?.attributionPercentage || 55}%) to ${top1?.name || 'vehicular emissions'}`;
+    if (top2) {
+      summary += ` and ${top2.attributionPercentage}% to ${top2.name}.`;
+    } else {
+      summary += '.';
+    }
+  } else if (polKey === 'o3') {
+    summary = `Ground-level ${polInfo.formula} (${baseVal} ${polInfo.units}) detected. Ground-level ozone is secondary photochemical smog formed from precursor reactions under solar radiation. Proximity to nearby facilities does not establish direct emission causality.`;
+    attributionNote = 'Source attribution unavailable for this dataset. Secondary photochemical formation requires photochemical dispersion modeling.';
   } else {
-    summary += '.';
+    summary = `Observed ${polInfo.formula} (${baseVal} ${polInfo.units}). Candidate nearby sources are identified by spatial proximity. Quantitative receptor contribution modeling is currently unavailable for this dataset.`;
+    attributionNote = 'Quantitative source attribution unavailable for this dataset.';
   }
 
   let compliance: PinpointAttributionResult['regulatoryCompliance'] = 'COMPLIANT';
-  if (currentNO2 > 180) compliance = 'CRITICAL_VIOLATION';
-  else if (currentNO2 > 80) compliance = 'EXCEEDANCE_WARNING';
+  if (baseVal > polInfo.naaqs24h * 1.8) compliance = 'CRITICAL_VIOLATION';
+  else if (baseVal > polInfo.naaqs24h) compliance = 'EXCEEDANCE_WARNING';
 
   return {
     locationName,
     coordinates: [centerLat, centerLng],
-    currentNO2,
+    currentNO2: baseVal,
+    currentValue: baseVal,
+    pollutant: polKey,
+    pollutantName: polInfo.formula,
+    units: polInfo.units,
+    measurementType: polInfo.isColumn ? 'satellite_column' : 'surface_concentration',
+    datasetId: polKey === 'no2' ? 'no2_61day_2025' : `${polKey}_cams_61day_2025`,
     hazardBand: hazard.category,
     forecast,
     sources: attributedSources,
@@ -400,5 +673,7 @@ export function calculateAttribution(
     },
     summary,
     regulatoryCompliance: compliance,
+    attributionAvailable: isQuantitativeAttributionSupported,
+    attributionNote,
   };
 }

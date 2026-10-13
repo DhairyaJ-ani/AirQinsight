@@ -94,29 +94,31 @@ async def get_spatial_forecast(
 
 @router.get(
     "/point",
-    summary="NO₂ at a point from the uploaded data for a date, with the forecast model's predictions",
+    summary="Pollutant value at a point from the uploaded data for a date, with the forecast model's predictions",
     tags=["trends"],
 )
 async def get_point(
     lat: float,
     lon: float,
     date: str | None = None,
+    pollutant: str = "no2",
     current_user: dict = Depends(get_current_user),
 ) -> dict:
     """
-    For the home page's pinpoint card: the value at the point in that day's uploaded GeoTIFF (the same data
+    For the pinpoint intelligence card: the value at the point in that day's uploaded GeoTIFF (the same data
     the map heatmap and Plume Flow show) and the forecasting model's +3/+6/+12/+24 h predictions from it.
 
     - **date**: YYYY-MM-DD from `GET /downscale/dates` (default: the first uploaded day)
+    - **pollutant**: one of no2, pm25, pm10, so2, o3, co (default: no2)
     """
     import asyncio
 
     from app.services import upload_data
 
-    dates = upload_data.available_dates()
+    dates = upload_data.available_dates(pollutant=pollutant)
     if not dates:
-        raise HTTPException(status_code=404, detail="No uploaded data")
+        raise HTTPException(status_code=404, detail=f"No uploaded data for {pollutant}")
     try:
-        return await asyncio.to_thread(upload_data.point_forecast, lat, lon, date or dates[0])
+        return await asyncio.to_thread(upload_data.point_forecast, lat, lon, date or dates[0], pollutant=pollutant)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
