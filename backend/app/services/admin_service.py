@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List
 
 from fastapi import HTTPException, UploadFile
@@ -127,7 +128,8 @@ async def upload_dataset(
         )
 
     file_content = await file.read()
-    storage_path = f"{dataset_type}/{filename}"
+    clean_filename = Path(filename).name
+    storage_path = f"{dataset_type}/{clean_filename}"
 
     try:
         supabase.storage.from_("datasets").upload(

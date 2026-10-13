@@ -257,7 +257,7 @@ You can run AirQ Insight immediately **without any cloud account, Supabase proje
    ```
 2. In `frontend/.env.local`, set:
    ```env
-   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=AIzaSyBoQqBbWgSdkmDrHvPU7M022Y-fUhcRNp0
+   NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=your-google-maps-api-key
    ```
 
 ---

@@ -21,7 +21,18 @@ export async function POST(req: NextRequest) {
 
     const trimmedKey = key.trim();
 
+    // Strict validation to prevent environment file injection
+    if (!/^[a-zA-Z0-9_-]{20,60}$/.test(trimmedKey)) {
+      return NextResponse.json({ error: 'Invalid API key format' }, { status: 400 });
+    }
+
     if (persistToFile) {
+      if (process.env.NODE_ENV === 'production') {
+        return NextResponse.json(
+          { error: 'Environment file persistence is disabled in production environments' },
+          { status: 403 }
+        );
+      }
       const frontendDir = process.cwd();
       const envLocalPath = path.join(frontendDir, '.env.local');
       const envPath = path.join(frontendDir, '.env');
