@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import List
 
 from fastapi import HTTPException, UploadFile
@@ -9,6 +10,8 @@ from app.models.admin import BlockUserResponse, UploadResponse, UserListItem
 from app.services.activity_service import log_activity
 
 _ALLOWED_EXTENSIONS = {".nc", ".tif", ".csv", ".geojson"}
+_ALLOWED_DATASET_TYPES = {"satellite", "ground_station", "poi"}
+_MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024  # 50 MB limit
 
 
 async def list_users(supabase: Client) -> List[UserListItem]:
@@ -116,6 +119,12 @@ async def upload_dataset(
         HTTPException(400): If the file extension is not allowed.
         HTTPException(500): If the upload or catalog insert fails.
     """
+    if dataset_type not in _ALLOWED_DATASET_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid dataset_type '{dataset_type}'. Accepted: {', '.join(sorted(_ALLOWED_DATASET_TYPES))}",
+        )
+
     filename = file.filename or "unknown"
     extension = ""
     if "." in filename:
@@ -124,11 +133,23 @@ async def upload_dataset(
     if extension not in _ALLOWED_EXTENSIONS:
         raise HTTPException(
             status_code=400,
-            detail=f"File type '{extension}' is not allowed. Accepted: {', '.join(_ALLOWED_EXTENSIONS)}",
+            detail=f"File type '{extension}' is not allowed. Accepted: {', '.join(sorted(_ALLOWED_EXTENSIONS))}",
         )
 
     file_content = await file.read()
-    clean_filename = Path(filename).name
+    if len(file_content) > _MAX_FILE_SIZE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File too large. Maximum allowed size is {_MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB",
+        )
+
+    # Sanitize filename against directory traversal and null/control characters
+    raw_name = Path(filename).name
+    clean_stem = re.sub(r"[^a-zA-Z0-9_-]", "_", Path(raw_name).stem).strip("_")
+    if not clean_stem:
+        clean_stem = f"dataset_{int(datetime.now(timezone.utc).timestamp())}"
+    clean_filename = f"{clean_stem}{extension}"
+
     storage_path = f"{dataset_type}/{clean_filename}"
 
     try:

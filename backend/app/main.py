@@ -19,16 +19,29 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Allow all origins for development — tighten to specific domains in production
+# CORS configuration: restrict credentialed access to local dev hosts and configured frontend domains
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://localhost:3001",
+        "http://127.0.0.1:3001",
+    ],
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
     # let the browser read the report file name and status headers
-    expose_headers=["Content-Disposition", "X-Report-Status", "X-Report-Narrative", "X-Report-Language",
-                    "X-Report-Notice"],
+    expose_headers=[
+        "Content-Disposition",
+        "X-Report-Status",
+        "X-Report-Narrative",
+        "X-Report-Language",
+        "X-Report-Notice",
+    ],
 )
 
 # compress JSON responses (the global NO2 grid is ~2.8 MB of base64 before compression)
